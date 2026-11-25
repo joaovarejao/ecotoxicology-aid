@@ -871,6 +871,501 @@
   }
 
   /**
+   * Builds Plotly specs for Daphnia magna Acute Immobilization & Probit Analysis.
+   */
+  function buildDaphniaSpecs(analysis, concUnit, forceLight = false, viewOptions = {}) {
+    const t = getThemeTokens(forceLight);
+    const { rows, timepoint, targetPct, probit, primaryEC } = analysis;
+    if (!rows || rows.length === 0) return {};
+
+    const view = {
+      highlightConcs: Array.isArray(viewOptions.highlightConcs) ? viewOptions.highlightConcs.map(Number) : [],
+      isolate: Boolean(viewOptions.isolate),
+      logX: Boolean(viewOptions.logX),
+    };
+    const hasHighlight = view.highlightConcs.length > 0;
+    const isSelected = (c) => view.highlightConcs.includes(Number(c));
+    const sortedConcs = rows.map((r) => r.concentration);
+
+    const visibleRows = view.isolate && hasHighlight ? rows.filter((r) => isSelected(r.concentration)) : rows;
+    const specs = {};
+
+    // 1. Dose-Response: Immobilization (%) vs. Concentration (24h & 48h)
+    const doseRows = view.logX ? visibleRows.filter((r) => r.concentration > 0) : visibleRows;
+    const pts24 = doseRows.filter((r) => r.corr24 !== null);
+    const pts48 = doseRows.filter((r) => r.corr48 !== null);
+    const doseTraces = [];
+
+    if (pts24.length > 0) {
+      const isActive = timepoint === "24h";
+      doseTraces.push({
+        type: "scatter",
+        mode: "lines+markers",
+        name: isActive ? "24 h Immobilization (active)" : "24 h Immobilization",
+        x: pts24.map((r) => r.concentration),
+        y: pts24.map((r) => r.corr24),
+        line: { color: t.blue, width: isActive ? 3 : 1.8, dash: isActive ? "solid" : "dot" },
+        marker: {
+          size: pts24.map((r) => (hasHighlight && isSelected(r.concentration) ? 12 : isActive ? 8 : 6)),
+          color: pts24.map((r) => (hasHighlight && !isSelected(r.concentration) ? t.muted : t.blue)),
+        },
+        opacity: isActive ? 1 : 0.65,
+        hovertemplate: `<b>%{x} ${concUnit} (24 h)</b><br>Immobilized: %{y:.1f}%<extra></extra>`,
+      });
+    }
+
+    if (pts48.length > 0) {
+      const isActive = timepoint === "48h";
+      doseTraces.push({
+        type: "scatter",
+        mode: "lines+markers",
+        name: isActive ? "48 h Immobilization (active)" : "48 h Immobilization",
+        x: pts48.map((r) => r.concentration),
+        y: pts48.map((r) => r.corr48),
+        line: { color: t.crimson, width: isActive ? 3 : 1.8, dash: isActive ? "solid" : "dot" },
+        marker: {
+          size: pts48.map((r) => (hasHighlight && isSelected(r.concentration) ? 12 : isActive ? 8.5 : 6)),
+          color: pts48.map((r) => (hasHighlight && !isSelected(r.concentration) ? t.muted : t.crimson)),
+        },
+        opacity: isActive ? 1 : 0.65,
+        hovertemplate: `<b>%{x} ${concUnit} (48 h)</b><br>Immobilized: %{y:.1f}%<extra></extra>`,
+      });
+    }
+
+    const doseShapes = [
+      {
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        y0: targetPct,
+        y1: targetPct,
+        line: { color: t.threshold, width: 1.5, dash: "dash" },
+      },
+      {
+        type: "line",
+        xref: "paper",
+        x0: 0,
+        x1: 1,
+        y0: 10,
+        y1: 10,
+        line: { color: t.teal, width: 1, dash: "dot" },
+      },
+    ];
+    const doseAnnotations = [
+      {
+        xref: "paper",
+        x: 0.99,
+        y: targetPct,
+        text: `EC${targetPct} (${targetPct}%)`,
+        showarrow: false,
+        xanchor: "right",
+        yanchor: "bottom",
+        font: { size: 10.5, color: t.muted },
+      },
+      {
+        xref: "paper",
+        x: 0.99,
+        y: 10,
+        text: "10% GD / Control Limit",
+        showarrow: false,
+        xanchor: "right",
+        yanchor: "bottom",
+        font: { size: 9.5, color: t.teal },
+      },
+    ];
+
+    if (primaryEC && Number.isFinite(primaryEC.value) && (!view.logX || primaryEC.value > 0)) {
+      doseTraces.push({
+        type: "scatter",
+        mode: "markers",
+        name: `Est. EC${targetPct} (${primaryEC.method})`,
+        x: [primaryEC.value],
+        y: [targetPct],
+        marker: { size: 11, symbol: "x", color: t.amber, line: { width: 2.5, color: t.amber } },
+        hovertemplate: `<b>Est. EC${targetPct} (${primaryEC.method})</b><br>${primaryEC.value.toFixed(4)} ${concUnit}<extra></extra>`,
+      });
+    }
+
+    specs.dose = {
+      key: "daphnia_dose",
+      title: `Daphnia Dose-Response: Immobilization % (${timepoint} active)`,
+      traces: doseTraces,
+      layout: baseLayout(
+        `Daphnia Dose-Response: Immobilization % (${timepoint} active)`,
+        view.logX ? `Concentration (${concUnit}, log₁₀ scale, c > 0)` : `Concentration (${concUnit})`,
+        "Immobilization (%)",
+        {
+          shapes: doseShapes,
+          annotations: doseAnnotations,
+          xaxis: view.logX ? { type: "log" } : {},
+          yaxis: { range: [-4, 108] },
+        },
+        forceLight
+      ),
+    };
+
+    // 2. Probit Linear Regression: Y = a + b * ln(C)
+    const probitPts = visibleRows.filter((r) => !r.isControl && r.lnConc !== null && r.probit !== null);
+    if (probitPts.length > 0) {
+      const pTraces = [
+        {
+          type: "scatter",
+          mode: "markers",
+          name: `Observed Probit (${timepoint})`,
+          x: probitPts.map((r) => r.lnConc),
+          y: probitPts.map((r) => r.probit),
+          customdata: probitPts.map((r) => [r.concentration, r.activePct]),
+          marker: {
+            size: probitPts.map((r) => (hasHighlight && isSelected(r.concentration) ? 13 : 9)),
+            color: probitPts.map((r) => (hasHighlight && !isSelected(r.concentration) ? t.muted : getConcColor(r.concentration, sortedConcs))),
+            line: { width: 1.5, color: t.plotBg },
+          },
+          hovertemplate: `<b>%{customdata[0]} ${concUnit}</b><br>ln(C) = %{x:.3f}<br>Probit Y = %{y:.3f} (%{customdata[1]:.1f}%)<extra></extra>`,
+        },
+      ];
+
+      const pShapes = [
+        {
+          type: "line",
+          xref: "paper",
+          x0: 0,
+          x1: 1,
+          y0: 5,
+          y1: 5,
+          line: { color: t.threshold, width: 1.5, dash: "dash" },
+        },
+      ];
+      const pAnn = [
+        {
+          xref: "paper",
+          x: 0.99,
+          y: 5,
+          text: "Probit = 5.0 (LC₅₀ / EC₅₀)",
+          showarrow: false,
+          xanchor: "right",
+          yanchor: "bottom",
+          font: { size: 10, color: t.muted },
+        },
+      ];
+
+      if (probit) {
+        pTraces.push({
+          type: "scatter",
+          mode: "lines",
+          name: `OLS Fit: Y = ${probit.intercept.toFixed(2)} + ${probit.slope.toFixed(2)}·ln(C)`,
+          x: probit.lineX,
+          y: probit.lineY,
+          line: { color: t.crimson, width: 2.5 },
+          hoverinfo: "skip",
+        });
+
+        if (probit.ec50 && probit.ec50 > 0) {
+          const lnEc50 = Math.log(probit.ec50);
+          pTraces.push({
+            type: "scatter",
+            mode: "markers",
+            name: `Probit EC50 = ${probit.ec50.toFixed(4)} ${concUnit}`,
+            x: [lnEc50],
+            y: [5],
+            marker: { size: 11, symbol: "x", color: t.amber, line: { width: 2.5, color: t.amber } },
+            hovertemplate: `<b>Probit EC50</b><br>${probit.ec50.toFixed(4)} ${concUnit}<br>ln(EC50) = ${lnEc50.toFixed(3)}<extra></extra>`,
+          });
+          pShapes.push({
+            type: "line",
+            x0: lnEc50,
+            x1: lnEc50,
+            yref: "paper",
+            y0: 0,
+            y1: 1,
+            line: { color: t.amber, width: 1.3, dash: "dot" },
+          });
+        }
+
+        pAnn.push({
+          xref: "paper",
+          yref: "paper",
+          x: 0.02,
+          y: 0.96,
+          text: `Y = ${probit.intercept.toFixed(3)} + ${probit.slope.toFixed(3)}·ln(C) | R² = ${probit.r2 !== null ? probit.r2.toFixed(4) : "—"}`,
+          showarrow: false,
+          xanchor: "left",
+          yanchor: "top",
+          font: { size: 10.5, color: t.text },
+          bgcolor: t.plotBg,
+          bordercolor: t.grid,
+          borderwidth: 1,
+          borderpad: 4,
+        });
+      }
+
+      specs.probit = {
+        key: "daphnia_probit",
+        title: `Probit Regression (Finney Transformation — ${timepoint})`,
+        traces: pTraces,
+        layout: baseLayout(
+          `Probit Regression (Finney Transformation — ${timepoint})`,
+          `ln(Concentration [${concUnit}])`,
+          "Probit Value (Y)",
+          { shapes: pShapes, annotations: pAnn },
+          forceLight
+        ),
+      };
+    }
+
+    // 3. Stacked Mobile vs Immobilized Counts
+    const labels = visibleRows.map((r) => `${r.concentration} ${concUnit}${r.isControl ? " ★" : ""}`);
+    const mobileCounts = visibleRows.map((r) => (timepoint === "24h" ? r.mobile24 : r.mobile48) ?? 0);
+    const immobCounts = visibleRows.map((r) => (timepoint === "24h" ? r.immob24 : r.immob48) ?? 0);
+    const barOpacities = visibleRows.map((r) => (!hasHighlight || isSelected(r.concentration) ? 0.88 : 0.25));
+    const mobLayout = baseLayout(`Animal Counts: Mobile vs. Immobilized (${timepoint})`, `Concentration (${concUnit})`, "Daphnia Count (n)", {}, forceLight);
+    mobLayout.barmode = "stack";
+
+    specs.mobility = {
+      key: "daphnia_mobility",
+      title: mobLayout.title.text,
+      traces: [
+        {
+          type: "bar",
+          name: "Mobile (Swimming)",
+          x: labels,
+          y: mobileCounts,
+          marker: { color: t.teal, opacity: barOpacities },
+          hovertemplate: "<b>%{x}</b><br>Mobile: %{y}<extra></extra>",
+        },
+        {
+          type: "bar",
+          name: "Immobilized",
+          x: labels,
+          y: immobCounts,
+          marker: { color: t.crimson, opacity: barOpacities },
+          hovertemplate: "<b>%{x}</b><br>Immobilized: %{y}<extra></extra>",
+        },
+      ],
+      layout: mobLayout,
+    };
+
+    return specs;
+  }
+
+  function renderDaphniaCharts(analysis, concUnit, viewOptions = {}) {
+    const { rows } = analysis;
+    if (!rows || rows.length === 0) {
+      showEmpty("daphnia-chart-dose", "No Daphnia observations yet", "Enter animal counts (24 h / 48 h) on the left to plot immobilization dose-response.");
+      showEmpty("daphnia-chart-probit", "Probit regression needs partial responses", "Add at least two test concentrations with 0% < immobilization < 100% (or check Geometric Mean EC50).");
+      showEmpty("daphnia-chart-mobility", "No Daphnia counts yet", "Stacked mobile vs. immobilized bar chart will appear here.");
+      return;
+    }
+
+    const specs = buildDaphniaSpecs(analysis, concUnit, false, viewOptions);
+
+    const doseEl = preparePlotEl("daphnia-chart-dose");
+    if (doseEl && specs.dose) {
+      global.Plotly.react(doseEl, specs.dose.traces, specs.dose.layout, plotConfig("daphnia_dose_response"));
+    }
+
+    if (!specs.probit) {
+      showEmpty("daphnia-chart-probit", "No intermediate mortality (0% < p < 100%)", "Probit transformation requires partial responses between 0% and 100%. Use Geometric Mean √(a·b) when responses jump from 0% to 100%.");
+    } else {
+      const probitEl = preparePlotEl("daphnia-chart-probit");
+      if (probitEl) {
+        global.Plotly.react(probitEl, specs.probit.traces, specs.probit.layout, plotConfig("daphnia_probit"));
+      }
+    }
+
+    const mobEl = preparePlotEl("daphnia-chart-mobility");
+    if (mobEl && specs.mobility) {
+      global.Plotly.react(mobEl, specs.mobility.traces, specs.mobility.layout, plotConfig("daphnia_mobility"));
+    }
+  }
+
+  /**
+   * Builds Plotly specs for Vibrio fischeri Bioluminescence Inhibition Assay (ISO 11348-2).
+   */
+  function buildVibrioSpecs(analysis, concUnit, forceLight = false, viewOptions = {}) {
+    const t = getThemeTokens(forceLight);
+    const { rows, ec20, ec50, targetPct, ecTarget } = analysis;
+    if (!rows || rows.length === 0) return {};
+
+    const view = {
+      highlightConcs: Array.isArray(viewOptions.highlightConcs) ? viewOptions.highlightConcs.map(Number) : [],
+      isolate: Boolean(viewOptions.isolate),
+      logX: Boolean(viewOptions.logX),
+      showErrorBars: viewOptions.showErrorBars !== false,
+    };
+    const hasHighlight = view.highlightConcs.length > 0;
+    const isSelected = (c) => view.highlightConcs.includes(Number(c));
+    const visibleRows = view.isolate && hasHighlight ? rows.filter((r) => isSelected(r.concentration)) : rows;
+    const specs = {};
+
+    // 1. Bioluminescence Inhibition (%) vs. Concentration
+    const inhRows = (view.logX ? visibleRows.filter((r) => r.concentration > 0) : visibleRows).filter((r) => r.inhibition !== null);
+    if (inhRows.length > 0) {
+      const traces = [
+        {
+          type: "scatter",
+          mode: "lines+markers",
+          name: "Luminescence Inhibition (%)",
+          x: inhRows.map((r) => r.concentration),
+          y: inhRows.map((r) => r.inhibition),
+          error_y: view.showErrorBars
+            ? {
+                type: "data",
+                array: inhRows.map((r) => r.sdInhibition || 0),
+                visible: true,
+                thickness: 1.5,
+                width: 4,
+              }
+            : { visible: false },
+          line: { color: t.crimson, width: 2.8 },
+          marker: {
+            size: inhRows.map((r) => (hasHighlight && isSelected(r.concentration) ? 13 : 8.5)),
+            color: inhRows.map((r) => {
+              if (hasHighlight && !isSelected(r.concentration)) return t.muted;
+              return r.toxic ? t.crimson : t.teal;
+            }),
+            line: { width: 1.5, color: t.plotBg },
+          },
+          hovertemplate: `<b>%{x} ${concUnit}</b><br>Inhibition: %{y:.2f}%<extra></extra>`,
+        },
+      ];
+
+      const shapes = [
+        {
+          type: "line",
+          xref: "paper",
+          x0: 0,
+          x1: 1,
+          y0: 20,
+          y1: 20,
+          line: { color: t.amber, width: 1.5, dash: "dash" },
+        },
+        {
+          type: "line",
+          xref: "paper",
+          x0: 0,
+          x1: 1,
+          y0: 50,
+          y1: 50,
+          line: { color: t.crimson, width: 1.5, dash: "dash" },
+        },
+      ];
+      const annotations = [
+        {
+          xref: "paper",
+          x: 0.99,
+          y: 20,
+          text: "20% Toxicity Threshold (EC20 / LID)",
+          showarrow: false,
+          xanchor: "right",
+          yanchor: "bottom",
+          font: { size: 10, color: t.amber },
+        },
+        {
+          xref: "paper",
+          x: 0.99,
+          y: 50,
+          text: "50% (EC50)",
+          showarrow: false,
+          xanchor: "right",
+          yanchor: "bottom",
+          font: { size: 10, color: t.crimson },
+        },
+      ];
+
+      if (ecTarget && ecTarget.status === "interpolated" && (!view.logX || ecTarget.value > 0)) {
+        traces.push({
+          type: "scatter",
+          mode: "markers",
+          name: `Est. EC${targetPct}`,
+          x: [ecTarget.value],
+          y: [targetPct],
+          marker: { size: 11, symbol: "x", color: t.amber, line: { width: 2.5, color: t.amber } },
+          hovertemplate: `<b>Est. EC${targetPct}</b><br>${ecTarget.value.toFixed(4)} ${concUnit}<extra></extra>`,
+        });
+      }
+
+      specs.inhibition = {
+        key: "vibrio_inhibition",
+        title: "Bioluminescence Inhibition (%) vs. Concentration",
+        traces,
+        layout: baseLayout(
+          "Bioluminescence Inhibition (%) vs. Concentration",
+          view.logX ? `Concentration (${concUnit}, log₁₀ scale, c > 0)` : `Concentration (${concUnit})`,
+          "Luminescence Inhibition (%)",
+          { shapes, annotations, xaxis: view.logX ? { type: "log" } : {} },
+          forceLight
+        ),
+      };
+    }
+
+    // 2. Luminescence Intensity Comparison: I0, Corrected Expected Ict, Measured It
+    const labels = visibleRows.map((r) => `${r.concentration} ${concUnit}${r.isControl ? " ★" : ""}`);
+    const op = visibleRows.map((r) => (!hasHighlight || isSelected(r.concentration) ? 0.88 : 0.25));
+    const lumLayout = baseLayout("Luminescence Intensity: I₀ vs. Expected Ict vs. Measured It", `Concentration (${concUnit})`, "Luminescence (RLU)", {}, forceLight);
+    lumLayout.barmode = "group";
+
+    specs.luminescence = {
+      key: "vibrio_luminescence",
+      title: lumLayout.title.text,
+      traces: [
+        {
+          type: "bar",
+          name: "Initial (I₀)",
+          x: labels,
+          y: visibleRows.map((r) => r.meanI0),
+          marker: { color: t.blue, opacity: op },
+          hovertemplate: "<b>%{x}</b><br>I₀: %{y:,.1f} RLU<extra></extra>",
+        },
+        {
+          type: "bar",
+          name: "Expected (Ict = I₀·fkt)",
+          x: labels,
+          y: visibleRows.map((r) => r.meanIct),
+          marker: { color: t.amber, opacity: op },
+          hovertemplate: "<b>%{x}</b><br>Ict: %{y:,.1f} RLU<extra></extra>",
+        },
+        {
+          type: "bar",
+          name: "Measured (It)",
+          x: labels,
+          y: visibleRows.map((r) => r.meanIt),
+          marker: { color: t.teal, opacity: op },
+          hovertemplate: "<b>%{x}</b><br>It: %{y:,.1f} RLU<extra></extra>",
+        },
+      ],
+      layout: lumLayout,
+    };
+
+    return specs;
+  }
+
+  function renderVibrioCharts(analysis, concUnit, viewOptions = {}) {
+    const { rows } = analysis;
+    if (!rows || rows.length === 0) {
+      showEmpty("vibrio-chart-inhibition", "No Vibrio luminescence data yet", "Enter I₀ and It readings (include 2% NaCl control) on the left to compute fkt and inhibition %.");
+      showEmpty("vibrio-chart-luminescence", "No luminescence readings yet", "I₀ vs. corrected Ict vs. measured It bar comparison will appear here.");
+      return;
+    }
+
+    const specs = buildVibrioSpecs(analysis, concUnit, false, viewOptions);
+
+    if (!specs.inhibition) {
+      showEmpty("vibrio-chart-inhibition", "2% NaCl Control missing", "Add at least one Control row (2% NaCl) with I₀ and It so correction factor fkt can be computed.");
+    } else {
+      const inhEl = preparePlotEl("vibrio-chart-inhibition");
+      if (inhEl) {
+        global.Plotly.react(inhEl, specs.inhibition.traces, specs.inhibition.layout, plotConfig("vibrio_inhibition"));
+      }
+    }
+
+    const lumEl = preparePlotEl("vibrio-chart-luminescence");
+    if (lumEl && specs.luminescence) {
+      global.Plotly.react(lumEl, specs.luminescence.traces, specs.luminescence.layout, plotConfig("vibrio_luminescence"));
+    }
+  }
+
+  /**
    * Renders a Plotly spec offscreen and returns an embedded vector SVG (or PNG fallback) data URI.
    */
   async function renderSpecToImage(spec, width = 760, height = 430) {
@@ -915,8 +1410,12 @@
     buildTimeSeriesSpecs,
     buildLemnaSpecs,
     buildDilutionSpec,
+    buildDaphniaSpecs,
+    buildVibrioSpecs,
     renderTimeSeriesSuite,
     renderLemnaCharts,
+    renderDaphniaCharts,
+    renderVibrioCharts,
     renderDilutionChart,
     renderSpecToImage,
   };

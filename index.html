@@ -10,6 +10,7 @@
   <script src="js/storage.js" defer></script>
   <script src="js/charts.js" defer></script>
   <script src="js/exporter.js" defer></script>
+  <script src="js/docs.js" defer></script>
   <script src="js/app.js" defer></script>
 </head>
 <body>
@@ -19,7 +20,7 @@
       <div class="brand-icon" aria-hidden="true">μ</div>
       <div>
         <div class="brand-title">Ecotoxicology Aid</div>
-        <div class="brand-sub">OD · Cell Count · Lemna · Local Benchtop</div>
+        <div class="brand-sub">Algae · Lemna · Daphnia · Vibrio · Docs</div>
       </div>
     </div>
 
@@ -66,7 +67,7 @@
   <nav class="tabbar" id="main-tabbar" aria-label="Assay Tabs">
     <div class="tabs" role="tablist">
       <button type="button" class="tab-btn active" data-tab="od" role="tab" aria-selected="true">
-        OD Measurements <span class="tab-badge" id="badge-od">0</span>
+        OD (Algae) <span class="tab-badge" id="badge-od">0</span>
       </button>
       <button type="button" class="tab-btn" data-tab="cellcount" role="tab" aria-selected="false">
         Cell Count <span class="tab-badge" id="badge-cellcount">0</span>
@@ -74,8 +75,14 @@
       <button type="button" class="tab-btn" data-tab="lemna" role="tab" aria-selected="false">
         Lemna minor <span class="tab-badge" id="badge-lemna">0</span>
       </button>
+      <button type="button" class="tab-btn" data-tab="daphnia" role="tab" aria-selected="false">
+        Daphnia &amp; Probit <span class="tab-badge" id="badge-daphnia">0</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="vibrio" role="tab" aria-selected="false">
+        Vibrio fischeri <span class="tab-badge" id="badge-vibrio">0</span>
+      </button>
       <button type="button" class="tab-btn" data-tab="dilutions" role="tab" aria-selected="false">
-        Dilutions &amp; Notes <span class="tab-badge" id="badge-dilutions">0</span>
+        Docs, Dilutions &amp; Notes <span class="tab-badge" id="badge-dilutions">0</span>
       </button>
     </div>
 
@@ -498,6 +505,10 @@
                 <label for="lemna-nt-b">Rep B — Final <span class="form-hint">opt</span></label>
                 <input type="number" step="any" min="1" id="lemna-nt-b" class="input input-mono" placeholder="e.g. 22" />
               </div>
+              <div class="form-field full">
+                <label for="lemna-notes">Phytotoxicity Notes <span class="form-hint">chlorosis, necrosis, roots</span></label>
+                <input type="text" id="lemna-notes" class="input" placeholder="e.g. slight yellowing, short roots" />
+              </div>
             </div>
             <div class="form-actions">
               <button type="submit" id="lemna-submit-btn" class="btn btn-primary">Add Lemna Sample</button>
@@ -598,15 +609,320 @@
     </div>
   </main>
 
-  <!-- ================= TAB 4: DILUTIONS & NOTES ================= -->
-  <main id="panel-dilutions" class="tab-panel">
+  <!-- ================= TAB 4: DAPHNIA MAGNA & PROBIT ================= -->
+  <main id="panel-daphnia" class="tab-panel">
     <div class="workspace-split">
-      <!-- LEFT: Dilution Series Builder & List -->
       <aside class="panel-left">
         <section class="section-card">
           <div class="section-header">
+            <h2 class="section-title" id="daphnia-form-title">New Daphnia Observation</h2>
+            <span class="form-hint">OECD 202 · DIN 38412 L30</span>
+          </div>
+          <form id="daphnia-form" autocomplete="off">
+            <input type="hidden" id="daphnia-edit-id" value="" />
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="daphnia-conc">Concentration (<span class="unit-label">g/mL</span>)</label>
+                <input type="number" step="any" id="daphnia-conc" class="input input-mono" placeholder="0 = Control" required />
+              </div>
+              <div class="form-field">
+                <label for="daphnia-total">Total Neonates (N)</label>
+                <input type="number" step="1" min="1" id="daphnia-total" class="input input-mono" value="20" required />
+              </div>
+              <div class="form-field">
+                <label for="daphnia-immob-24">Immobilized at 24 h</label>
+                <input type="number" step="1" min="0" id="daphnia-immob-24" class="input input-mono" placeholder="e.g. 0" />
+              </div>
+              <div class="form-field">
+                <label for="daphnia-immob-48">Immobilized at 48 h</label>
+                <input type="number" step="1" min="0" id="daphnia-immob-48" class="input input-mono" placeholder="e.g. 12" />
+              </div>
+              <div class="form-field full">
+                <label for="daphnia-notes">Replicate / Behavior Notes <span class="form-hint">optional</span></label>
+                <input type="text" id="daphnia-notes" class="input" placeholder="e.g. 4×5 neonates, sluggish swimming" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" id="daphnia-submit-btn" class="btn btn-primary">Add Observation</button>
+              <button type="button" id="daphnia-cancel-edit" class="btn" hidden>Cancel</button>
+            </div>
+            <details class="inline-danger-disclosure" id="daphnia-delete-wrap" hidden>
+              <summary>Remove this Daphnia observation...</summary>
+              <div class="inline-danger-body">
+                <span>Permanently delete this entry?</span>
+                <button type="button" id="daphnia-delete-btn" class="btn btn-xs btn-danger">Delete Entry</button>
+              </div>
+            </details>
+          </form>
+        </section>
+
+        <section class="entries-section">
+          <div class="section-header">
+            <h3 class="section-title">Daphnia Entries (<span id="daphnia-list-count">0</span>)</h3>
+            <span class="form-hint">Click Edit to modify</span>
+          </div>
+          <div id="daphnia-entries-list" class="entries-list"></div>
+        </section>
+      </aside>
+
+      <section class="panel-right">
+        <div class="analysis-bar">
+          <div class="analysis-row">
+            <div class="analysis-filters">
+              <label class="inline-control" title="Selected control is starred ★ across all charts">
+                Control Conc.
+                <select id="daphnia-ctrl-conc"></select>
+              </label>
+              <label class="inline-control">
+                Timepoint
+                <select id="daphnia-timepoint">
+                  <option value="48h" selected>48 h (OECD 202)</option>
+                  <option value="24h">24 h (DIN L30)</option>
+                </select>
+              </label>
+              <label class="inline-control">
+                Endpoint
+                <select id="daphnia-ec-target">
+                  <option value="50" selected>EC50 / LC50 (50%)</option>
+                  <option value="20">EC20 (20%)</option>
+                  <option value="10">EC10 (10%)</option>
+                  <option value="90">EC90 (90%)</option>
+                </select>
+              </label>
+            </div>
+            <button type="button" id="btn-daphnia-export-csv" class="btn btn-sm">Export Daphnia CSV</button>
+          </div>
+          <div class="chart-manip-bar">
+            <div class="conc-chips-group">
+              <span class="manip-label">Concentrations</span>
+              <div class="conc-chips" id="daphnia-conc-chips"></div>
+              <div class="segmented segmented-xs" id="daphnia-filter-mode">
+                <button type="button" class="active" data-mode="highlight">Highlight</button>
+                <button type="button" data-mode="isolate">Isolate</button>
+              </div>
+            </div>
+            <div class="chart-toggles">
+              <button type="button" class="toggle-pill active" id="daphnia-toggle-abbott" aria-pressed="true" title="Apply Abbott control correction when control mortality > 0%">Abbott Corr.</button>
+              <button type="button" class="toggle-pill" id="daphnia-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label" id="daphnia-kpi-ec-label">Est. EC50 (48 h)</div>
+            <div class="kpi-value crimson" id="daphnia-kpi-ec">—</div>
+            <div class="kpi-sub" id="daphnia-kpi-ec-sub">Probit / Geom. Mean</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Probit Fit &amp; Fallback</div>
+            <div class="kpi-value accent" id="daphnia-kpi-probit">—</div>
+            <div class="kpi-sub" id="daphnia-kpi-probit-sub">Y = a + b·ln(C) · √(a·b)</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Control Validity (≤10%)</div>
+            <div class="kpi-value" id="daphnia-kpi-valid">—</div>
+            <div class="kpi-sub" id="daphnia-kpi-valid-sub">OECD 202 criterion</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">GD / NOEC / LOEC</div>
+            <div class="kpi-value" id="daphnia-kpi-gd">—</div>
+            <div class="kpi-sub" id="daphnia-kpi-gd-sub">&gt;90% mobile threshold</div>
+          </div>
+        </div>
+
+        <div class="charts-grid lemna-grid">
+          <div class="chart-card"><div id="daphnia-chart-dose" class="chart-box"></div></div>
+          <div class="chart-card"><div id="daphnia-chart-probit" class="chart-box"></div></div>
+          <div class="chart-card span-2"><div id="daphnia-chart-mobility" class="chart-box"></div></div>
+        </div>
+
+        <div class="tables-card">
+          <div class="tables-header">
+            <span class="section-title">Daphnia Immobilization &amp; Finney Probit Table</span>
+            <span class="form-hint">Replicates at same concentration are pooled automatically</span>
+          </div>
+          <div class="table-scroll" id="daphnia-table-container"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= TAB 5: VIBRIO FISCHERI BIOLUMINESCENCE ================= -->
+  <main id="panel-vibrio" class="tab-panel">
+    <div class="workspace-split">
+      <aside class="panel-left">
+        <section class="section-card">
+          <div class="section-header">
+            <h2 class="section-title" id="vibrio-form-title">New Vibrio Reading</h2>
+            <span class="form-hint">ISO 11348-2 · 15 °C</span>
+          </div>
+          <form id="vibrio-form" autocomplete="off">
+            <input type="hidden" id="vibrio-edit-id" value="" />
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="vibrio-type">Sample Type</label>
+                <select id="vibrio-type" class="input">
+                  <option value="sample">Test Sample</option>
+                  <option value="control">2% NaCl Control</option>
+                  <option value="reference">ZnSO₄·7H₂O Ref (219.8 mg/L)</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="vibrio-contact">Contact Time (min)</label>
+                <select id="vibrio-contact" class="input input-mono">
+                  <option value="30" selected>30 min (I₃₀)</option>
+                  <option value="15">15 min (I₁₅)</option>
+                  <option value="5">5 min (I₅)</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label for="vibrio-conc">Conc. / Dilution (<span class="unit-label">g/mL</span>)</label>
+                <input type="number" step="any" id="vibrio-conc" class="input input-mono" placeholder="0 = Control" required />
+              </div>
+              <div class="form-field">
+                <label for="vibrio-well">Well / Rep <span class="form-hint">optional</span></label>
+                <input type="text" id="vibrio-well" class="input" placeholder="e.g. A1, Rep 1" />
+              </div>
+              <div class="form-field">
+                <label for="vibrio-i0">Initial Luminescence (I₀)</label>
+                <input type="number" step="any" min="0.0001" id="vibrio-i0" class="input input-mono" placeholder="e.g. 42500" required />
+              </div>
+              <div class="form-field">
+                <label for="vibrio-it">Final Luminescence (Iₜ)</label>
+                <input type="number" step="any" min="0" id="vibrio-it" class="input input-mono" placeholder="e.g. 28100" required />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" id="vibrio-submit-btn" class="btn btn-primary">Add Luminescence Reading</button>
+              <button type="button" id="vibrio-cancel-edit" class="btn" hidden>Cancel</button>
+            </div>
+            <details class="inline-danger-disclosure" id="vibrio-delete-wrap" hidden>
+              <summary>Remove this Vibrio reading...</summary>
+              <div class="inline-danger-body">
+                <span>Permanently delete this reading?</span>
+                <button type="button" id="vibrio-delete-btn" class="btn btn-xs btn-danger">Delete Reading</button>
+              </div>
+            </details>
+          </form>
+        </section>
+
+        <section class="entries-section">
+          <div class="section-header">
+            <h3 class="section-title">Vibrio Readings (<span id="vibrio-list-count">0</span>)</h3>
+            <span class="form-hint">Click Edit to modify</span>
+          </div>
+          <div id="vibrio-entries-list" class="entries-list"></div>
+        </section>
+      </aside>
+
+      <section class="panel-right">
+        <div class="analysis-bar">
+          <div class="analysis-row">
+            <div class="analysis-filters">
+              <label class="inline-control">
+                Contact Time
+                <select id="vibrio-filter-contact"></select>
+              </label>
+              <label class="inline-control" title="Control used for correction factor fkt = Ikt / I0">
+                Control Conc.
+                <select id="vibrio-ctrl-conc"></select>
+              </label>
+              <label class="inline-control">
+                Endpoint
+                <select id="vibrio-ec-target">
+                  <option value="50" selected>EC50 (50%)</option>
+                  <option value="20">EC20 (20% toxic)</option>
+                </select>
+              </label>
+            </div>
+            <button type="button" id="btn-vibrio-export-csv" class="btn btn-sm">Export Vibrio CSV</button>
+          </div>
+          <div class="chart-manip-bar">
+            <div class="conc-chips-group">
+              <span class="manip-label">Concentrations</span>
+              <div class="conc-chips" id="vibrio-conc-chips"></div>
+              <div class="segmented segmented-xs" id="vibrio-filter-mode">
+                <button type="button" class="active" data-mode="highlight">Highlight</button>
+                <button type="button" data-mode="isolate">Isolate</button>
+              </div>
+            </div>
+            <div class="chart-toggles">
+              <button type="button" class="toggle-pill active" id="vibrio-toggle-sd" aria-pressed="true" title="Toggle ± SD error bars">± SD</button>
+              <button type="button" class="toggle-pill" id="vibrio-toggle-logx" aria-pressed="false" title="Switch X-axis to log10 scale">Log X</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Correction Factor <span class="keep-case">f_kt</span></div>
+            <div class="kpi-value accent" id="vibrio-kpi-fkt">—</div>
+            <div class="kpi-sub" id="vibrio-kpi-fkt-sub">ISO 11348 valid: 0.6–1.8</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Max Inhibition</div>
+            <div class="kpi-value crimson" id="vibrio-kpi-max-inh">—</div>
+            <div class="kpi-sub" id="vibrio-kpi-max-inh-sub">&gt;20% = toxic</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label" id="vibrio-kpi-ec-label">Est. EC50 / EC20</div>
+            <div class="kpi-value" id="vibrio-kpi-ec">—</div>
+            <div class="kpi-sub" id="vibrio-kpi-ec-sub">Linear interpolation</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">LID / <span class="keep-case">G_L</span> &amp; Ref</div>
+            <div class="kpi-value" id="vibrio-kpi-lid">—</div>
+            <div class="kpi-sub" id="vibrio-kpi-lid-sub">Non-toxic (≤20%)</div>
+          </div>
+        </div>
+
+        <div class="charts-grid">
+          <div class="chart-card"><div id="vibrio-chart-inhibition" class="chart-box"></div></div>
+          <div class="chart-card"><div id="vibrio-chart-luminescence" class="chart-box"></div></div>
+        </div>
+
+        <div class="tables-card">
+          <div class="tables-header">
+            <span class="section-title">Vibrio fischeri Bioluminescence Table</span>
+            <span class="form-hint">Ict = I₀ × f_kt · Hemmung % = ((Ict − It) / Ict) × 100</span>
+          </div>
+          <div class="table-scroll" id="vibrio-table-container"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= TAB 6: DOCS, DILUTIONS & NOTES ================= -->
+  <main id="panel-dilutions" class="tab-panel">
+    <div class="workspace-split">
+      <!-- LEFT: Lab Notes + Dilution Series Builder (Always visible while reading docs) -->
+      <aside class="panel-left">
+        <section class="section-card notes-sidebar-card">
+          <div class="section-header">
+            <h2 class="section-title">Experiment Lab Notes</h2>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <button type="button" id="btn-notes-timestamp" class="btn btn-xs btn-ghost" title="Insert current date &amp; time">+ Time</button>
+              <span class="form-hint" id="notes-save-status">Saved locally</span>
+            </div>
+          </div>
+          <textarea id="exp-notes-textarea" class="input notes-sidebar-textarea" placeholder="Take protocol notes, record pH/temperature/O2, culture swaps, chlorosis/necrosis, Daphnia behavior, anomalies..."></textarea>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
             <h2 class="section-title" id="dil-form-title">Add Dilution Step</h2>
-            <button type="button" id="btn-dil-daphnia" class="btn btn-xs" title="Load Daphnia 20 mL preset">Load Daphnia 20mL</button>
+            <span class="form-hint">Verdünnungsreihe</span>
+          </div>
+          <div class="preset-bar">
+            <select id="dil-preset-select" class="input input-sm" aria-label="Protocol Dilution Preset">
+              <option value="daphnia">Daphnia 20 mL (0–2)</option>
+              <option value="algae_geom">Algae Geometric ≤3.2× (1–10 mg/L)</option>
+              <option value="algae_range">Algae Range-Finding (0.01–100 mg/L)</option>
+              <option value="algae_noec">Algae Wastewater NOEC (1:1.25–1:12)</option>
+              <option value="vibrio_serial">Vibrio 1:2 Serial (2% NaCl, 1 mL)</option>
+            </select>
+            <button type="button" id="btn-dil-daphnia" class="btn btn-xs" title="Load selected protocol dilution preset">Load Preset</button>
           </div>
           <form id="dil-form" autocomplete="off">
             <input type="hidden" id="dil-edit-id" value="" />
@@ -652,34 +968,54 @@
 
         <section class="entries-section">
           <div class="section-header">
-            <h3 class="section-title">Verdünnungsreihe (<span id="dil-list-count">0</span>)</h3>
+            <h3 class="section-title">Dilution Steps (<span id="dil-list-count">0</span>)</h3>
             <span class="form-hint">Click Edit to modify</span>
           </div>
           <div id="dil-entries-list" class="entries-list"></div>
         </section>
       </aside>
 
-      <!-- RIGHT: Stacked Volume Chart, Pipetting Table & Lab Notes -->
+      <!-- RIGHT: Live Dilutions Plan + English Protocol & Substance Documentation -->
       <section class="panel-right">
-        <div class="chart-card">
-          <div id="dilution-chart-bars" class="chart-box"></div>
-        </div>
-
         <div class="tables-card">
           <div class="tables-header">
-            <span class="section-title">Pipetting Plan (Verdünnungsreihe)</span>
-            <button type="button" id="btn-dil-export-csv" class="btn btn-xs">Export CSV</button>
+            <span class="section-title">Active Pipetting Plan (Verdünnungsreihe)</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button type="button" id="btn-dil-toggle-chart" class="btn btn-xs btn-ghost">Toggle Volume Chart</button>
+              <button type="button" id="btn-dil-export-csv" class="btn btn-xs">Export CSV</button>
+            </div>
           </div>
           <div class="table-scroll" id="dil-table-container"></div>
+          <div id="dilution-chart-wrap" class="dil-chart-collapse" hidden>
+            <div class="chart-card" style="margin-top:10px; border:none; box-shadow:none; padding:0;">
+              <div id="dilution-chart-bars" class="chart-box"></div>
+            </div>
+          </div>
         </div>
 
-        <div class="notes-card">
-          <div class="section-header">
-            <h3 class="section-title">Experiment Lab Notes</h3>
-            <span class="form-hint" id="notes-save-status">Saved locally</span>
+        <section class="docs-hub">
+          <div class="docs-toolbar">
+            <div class="docs-toolbar-top">
+              <div>
+                <h2 class="docs-hub-title">Laboratory Protocols &amp; Substance Documentation (English)</h2>
+                <p class="form-hint">Complete English reference translated from all 7 course PDFs (ISO/OECD bioassays, Probit analysis, Bi 58® SDS, Lambda-Cyhalothrin review)</p>
+              </div>
+              <input type="search" id="docs-search-input" class="input input-sm docs-search" placeholder="Search protocols, media, pH, EC50, CAS..." />
+            </div>
+            <div class="docs-topic-pills" id="docs-topic-pills">
+              <button type="button" class="toggle-pill active" data-doc-topic="all">All (7)</button>
+              <button type="button" class="toggle-pill" data-doc-topic="algae">Algae (ISO 8692)</button>
+              <button type="button" class="toggle-pill" data-doc-topic="lemna">Lemna (OECD 221)</button>
+              <button type="button" class="toggle-pill" data-doc-topic="daphnia">Daphnia (OECD 202)</button>
+              <button type="button" class="toggle-pill" data-doc-topic="vibrio">Vibrio (ISO 11348)</button>
+              <button type="button" class="toggle-pill" data-doc-topic="probit">Probit &amp; Finney</button>
+              <button type="button" class="toggle-pill" data-doc-topic="bi58">Bi 58® SDS</button>
+              <button type="button" class="toggle-pill" data-doc-topic="lambda">Lambda-Cyhalothrin</button>
+            </div>
           </div>
-          <textarea id="exp-notes-textarea" class="input" placeholder="Record observations, culture swaps, Daphnientest notes, anomalies..."></textarea>
-        </div>
+
+          <div id="docs-cards-container" class="docs-cards-container"></div>
+        </section>
       </section>
     </div>
   </main>
@@ -729,6 +1065,8 @@
                 <button type="button" id="btn-od-clear" class="btn btn-xs btn-danger">Clear OD (0)</button>
                 <button type="button" id="btn-cc-clear" class="btn btn-xs btn-danger">Clear Cell Counts (0)</button>
                 <button type="button" id="btn-lemna-clear" class="btn btn-xs btn-danger">Clear Lemna (0)</button>
+                <button type="button" id="btn-daphnia-clear" class="btn btn-xs btn-danger">Clear Daphnia (0)</button>
+                <button type="button" id="btn-vibrio-clear" class="btn btn-xs btn-danger">Clear Vibrio (0)</button>
                 <button type="button" id="btn-dil-clear" class="btn btn-xs btn-danger">Clear Dilutions (0)</button>
               </div>
               <div class="danger-zone-sep">

@@ -49,6 +49,8 @@
       odEntries: [],
       cellCountEntries: [],
       lemnaEntries: [],
+      daphniaEntries: [],
+      vibrioEntries: [],
       dilutions: [],
       notes: "",
     };
@@ -70,6 +72,8 @@
       odEntries: Array.isArray(exp.odEntries) ? exp.odEntries : [],
       cellCountEntries: Array.isArray(exp.cellCountEntries) ? exp.cellCountEntries : [],
       lemnaEntries: Array.isArray(exp.lemnaEntries) ? exp.lemnaEntries : [],
+      daphniaEntries: Array.isArray(exp.daphniaEntries) ? exp.daphniaEntries : [],
+      vibrioEntries: Array.isArray(exp.vibrioEntries) ? exp.vibrioEntries : [],
       dilutions: Array.isArray(exp.dilutions) ? exp.dilutions : [],
       notes: typeof exp.notes === "string" ? exp.notes : "",
     };
@@ -93,7 +97,7 @@
           } else if (!experiments.some((e) => e.id === activeExperimentId)) {
             activeExperimentId = experiments[0].id;
           }
-          const validTabs = ["od", "cellcount", "lemna", "dilutions"];
+          const validTabs = ["od", "cellcount", "lemna", "daphnia", "vibrio", "dilutions"];
           const activeTab = validTabs.includes(parsed.activeTab) ? parsed.activeTab : "od";
           return {
             version: 2,
@@ -179,6 +183,8 @@
       (Array.isArray(parsed.odEntries) ||
         Array.isArray(parsed.cellCountEntries) ||
         Array.isArray(parsed.lemnaEntries) ||
+        Array.isArray(parsed.daphniaEntries) ||
+        Array.isArray(parsed.vibrioEntries) ||
         Array.isArray(parsed.dilutions))
     ) {
       const exp = normalizeExperiment(parsed);

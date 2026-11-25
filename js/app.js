@@ -10,6 +10,7 @@
   const M = Ecotox.Math;
   const S = Ecotox.Storage;
   const C = Ecotox.Charts;
+  const D = Ecotox.Docs;
 
   // ---------- Application State ----------
   const state = {
@@ -22,13 +23,24 @@
     odControlConc: null,
     ccControlConc: null,
     lemnaControlConc: null,
+    daphniaControlConc: null,
+    daphniaTimepoint: "48h",
+    vibrioControlConc: null,
+    vibrioContactMin: null,
+    docsTopic: "all",
+    docsSearch: "",
+    dilChartOpen: false,
     lastOdAnalysis: null,
     lastCcAnalysis: null,
     lastLemnaAnalysis: null,
+    lastDaphniaAnalysis: null,
+    lastVibrioAnalysis: null,
     views: {
       od: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
       cc: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
       lemna: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
+      daphnia: { selectedConcs: new Set(), filterMode: "highlight", useAbbott: true, logX: false, targetPct: 50 },
+      vibrio: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, logX: false, targetPct: 50 },
     },
   };
 
@@ -36,6 +48,8 @@
     state.views.od.selectedConcs.clear();
     state.views.cc.selectedConcs.clear();
     state.views.lemna.selectedConcs.clear();
+    state.views.daphnia.selectedConcs.clear();
+    state.views.vibrio.selectedConcs.clear();
   }
 
   function renderConcChips(containerId, concs, controlConc, unit, view) {
@@ -257,6 +271,8 @@
       $("badge-od").textContent = "0";
       $("badge-cellcount").textContent = "0";
       $("badge-lemna").textContent = "0";
+      $("badge-daphnia").textContent = "0";
+      $("badge-vibrio").textContent = "0";
       $("badge-dilutions").textContent = "0";
       document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
       return;
@@ -293,6 +309,8 @@
     $("badge-od").textContent = exp.odEntries.length;
     $("badge-cellcount").textContent = exp.cellCountEntries.length;
     $("badge-lemna").textContent = exp.lemnaEntries.length;
+    $("badge-daphnia").textContent = (exp.daphniaEntries || []).length;
+    $("badge-vibrio").textContent = (exp.vibrioEntries || []).length;
     $("badge-dilutions").textContent = exp.dilutions.length;
   }
 
@@ -1016,7 +1034,7 @@
                   <span class="entry-val">μ=${M.formatNum(r.mu, 4)}</span>
                   ${r.inhibition !== null ? `<span class="form-hint ${formatInhClass(r.inhibition)}">${r.inhibition.toFixed(1)}%</span>` : ""}
                 </div>
-                <div class="entry-sub">A: ${r.n0A}→${r.ntA}${repB} · t=${r.tHours}h</div>
+                <div class="entry-sub">A: ${r.n0A}→${r.ntA}${repB} · t=${r.tHours}h${r.notes ? ` · ${escapeHtml(r.notes)}` : ""}</div>
               </div>
               <div class="entry-actions">
                 <button type="button" class="btn btn-xs btn-ghost" data-lemna-edit="${escapeHtml(r.id)}" title="Edit or remove sample">Edit</button>
@@ -1029,8 +1047,13 @@
 
     const ctrlRow = analysis.rows.find((r) => r.isControl);
     $("lemna-kpi-ctrl-mu").textContent = ctrlRow && ctrlRow.mu !== null ? M.formatNum(ctrlRow.mu, 5) : "—";
-    $("lemna-kpi-ctrl-td").textContent =
-      ctrlRow && ctrlRow.doublingTime !== null ? `Td = ${(ctrlRow.doublingTime / 24).toFixed(2)} days` : "Doubling time";
+    if (ctrlRow && ctrlRow.doublingTimeDays !== null) {
+      const validOk = analysis.validity && analysis.validity.tdOk && analysis.validity.muOk;
+      const pill = `<span class="valid-pill ${validOk ? "ok" : "fail"}">${validOk ? "OECD 221 PASS" : "Check Validity"}</span>`;
+      $("lemna-kpi-ctrl-td").innerHTML = `Td = ${ctrlRow.doublingTimeDays.toFixed(2)} d (${ctrlRow.muPerDay.toFixed(3)} d⁻¹) ${pill}`;
+    } else {
+      $("lemna-kpi-ctrl-td").textContent = "Doubling time (valid: Td < 2.5 d, μ ≥ 0.275 d⁻¹)";
+    }
 
     const inhRows = analysis.rows.filter((r) => r.inhibition !== null && !r.isControl);
     if (inhRows.length > 0) {
@@ -1074,7 +1097,9 @@
             <td>${M.formatNum(r.avgN0, 1)}</td>
             <td>${M.formatNum(r.avgNt, 1)}</td>
             <td>${M.formatNum(r.mu, 5)}</td>
+            <td>${r.muPerDay !== null ? M.formatNum(r.muPerDay, 3) : "—"}</td>
             <td class="${formatInhClass(r.inhibition)}">${r.inhibition !== null ? `${M.formatNum(r.inhibition, 2)}%` : "—"}</td>
+            <td>${r.notes ? escapeHtml(r.notes) : "—"}</td>
           </tr>`
         )
         .join("");
@@ -1090,7 +1115,9 @@
               <th>AVG N₀</th>
               <th>AVG Nₜ</th>
               <th>μ (h⁻¹)</th>
+              <th>μ (d⁻¹)</th>
               <th>Hemmung (%)</th>
+              <th>Phytotoxicity Notes</th>
             </tr>
           </thead>
           <tbody>${body}</tbody>
@@ -1111,10 +1138,439 @@
     $("lemna-nt-a").value = "";
     $("lemna-n0-b").value = "";
     $("lemna-nt-b").value = "";
+    $("lemna-notes").value = "";
   }
 
   // ==========================================================================
-  // TAB 4: DILUTIONS & NOTES
+  // TAB 4: DAPHNIA MAGNA & PROBIT ANALYSIS (OECD 202 / DIN 38412 L30)
+  // ==========================================================================
+
+  function renderDaphniaTab() {
+    const exp = getActiveExp();
+    if (!exp) return;
+    if (!Array.isArray(exp.daphniaEntries)) exp.daphniaEntries = [];
+    const unit = exp.meta.concUnit || "mg/L";
+    const view = state.views.daphnia;
+
+    const uniqueConcs = Array.from(new Set(exp.daphniaEntries.map((e) => Number(e.concentration)).filter(Number.isFinite))).sort((a, b) => a - b);
+    const ctrlSel = $("daphnia-ctrl-conc");
+    const defaultCtrl = Number(exp.meta.controlConc ?? 0);
+    if (state.daphniaControlConc === null || !uniqueConcs.includes(state.daphniaControlConc)) {
+      state.daphniaControlConc = uniqueConcs.includes(defaultCtrl) ? defaultCtrl : uniqueConcs[0] ?? defaultCtrl;
+    }
+    ctrlSel.innerHTML =
+      uniqueConcs.length > 0
+        ? uniqueConcs.map((c) => `<option value="${c}" ${c === state.daphniaControlConc ? "selected" : ""}>${c}</option>`).join("")
+        : `<option value="${defaultCtrl}">${defaultCtrl}</option>`;
+
+    const controlConc = state.daphniaControlConc;
+    const analysis = M.analyzeDaphnia(exp.daphniaEntries, {
+      controlConc,
+      timepoint: state.daphniaTimepoint,
+      targetPct: view.targetPct,
+      useAbbott: view.useAbbott,
+    });
+    state.lastDaphniaAnalysis = analysis;
+
+    renderConcChips("daphnia-conc-chips", uniqueConcs, controlConc, unit, view);
+
+    // Entries list
+    $("daphnia-list-count").textContent = exp.daphniaEntries.length;
+    const listEl = $("daphnia-entries-list");
+    const editId = $("daphnia-edit-id").value;
+    if (exp.daphniaEntries.length === 0) {
+      listEl.innerHTML = `<div class="empty-list">No Daphnia observations yet.<br/>Enter neonate counts (e.g. 20 animals = 4×5) and 24 h / 48 h immobilization above.</div>`;
+    } else {
+      const sortedEntries = [...exp.daphniaEntries].sort((a, b) => Number(a.concentration) - Number(b.concentration));
+      listEl.innerHTML = sortedEntries
+        .map((e) => {
+          const isCtrl = Number(e.concentration) === controlConc;
+          const p24 = e.immob24 !== null && e.immob24 !== "" && e.immob24 !== undefined ? `24h: ${e.immob24}/${e.totalAnimals}` : "24h: —";
+          const p48 = e.immob48 !== null && e.immob48 !== "" && e.immob48 !== undefined ? `48h: ${e.immob48}/${e.totalAnimals}` : "48h: —";
+          return `
+            <div class="entry-item ${e.id === editId ? "editing" : ""}">
+              <div class="entry-main">
+                <div class="entry-top">
+                  <span class="entry-conc-tag ${isCtrl ? "control" : ""}">${e.concentration} ${escapeHtml(unit)}${isCtrl ? " · Ctrl" : ""}</span>
+                  <span class="entry-val">N=${e.totalAnimals}</span>
+                </div>
+                <div class="entry-sub">${p24} · ${p48}${e.notes ? ` · ${escapeHtml(e.notes)}` : ""}</div>
+              </div>
+              <div class="entry-actions">
+                <button type="button" class="btn btn-xs btn-ghost" data-daphnia-edit="${escapeHtml(e.id)}" title="Edit or remove entry">Edit</button>
+              </div>
+            </div>`;
+        })
+        .join("");
+    }
+
+    // KPI Cards
+    $("daphnia-kpi-ec-label").textContent = `Est. EC${view.targetPct} (${state.daphniaTimepoint})`;
+    if (analysis.primaryEC) {
+      $("daphnia-kpi-ec").textContent = `${analysis.primaryEC.value.toFixed(4)} ${unit}`;
+      $("daphnia-kpi-ec-sub").textContent = `${analysis.primaryEC.method} · ${analysis.primaryEC.detail}`;
+    } else {
+      $("daphnia-kpi-ec").textContent = "—";
+      $("daphnia-kpi-ec-sub").textContent = "Need partial responses or 0%→100% bracket";
+    }
+
+    if (analysis.probit) {
+      $("daphnia-kpi-probit").textContent = `b = ${analysis.probit.slope.toFixed(2)} · R² = ${analysis.probit.r2 !== null ? analysis.probit.r2.toFixed(3) : "—"}`;
+      const gmTxt = analysis.geomMeanEC50 ? `Geom. Mean: ${analysis.geomMeanEC50.value.toFixed(4)} ${unit}` : `EC50=${analysis.probit.ec50 ? analysis.probit.ec50.toFixed(4) : "—"} ${unit}`;
+      $("daphnia-kpi-probit-sub").textContent = gmTxt;
+    } else if (analysis.geomMeanEC50) {
+      $("daphnia-kpi-probit").textContent = `${analysis.geomMeanEC50.value.toFixed(4)} ${unit}`;
+      $("daphnia-kpi-probit-sub").textContent = `Geom. Mean √(${analysis.geomMeanEC50.a} × ${analysis.geomMeanEC50.b})`;
+    } else {
+      $("daphnia-kpi-probit").textContent = "—";
+      $("daphnia-kpi-probit-sub").textContent = "Y = a + b·ln(C) · √(a·b)";
+    }
+
+    const activeCtrlPct = state.daphniaTimepoint === "24h" ? analysis.controlPct24 : analysis.controlPct48;
+    if (analysis.validity.okActive !== null) {
+      $("daphnia-kpi-valid").innerHTML = `<span class="valid-pill ${analysis.validity.okActive ? "ok" : "fail"}">${analysis.validity.okActive ? "VALID (PASS)" : "INVALID (>10%)"}</span>`;
+      $("daphnia-kpi-valid-sub").textContent = `Control (${state.daphniaTimepoint}): ${activeCtrlPct.toFixed(1)}% immob.`;
+    } else {
+      $("daphnia-kpi-valid").textContent = "—";
+      $("daphnia-kpi-valid-sub").textContent = "Add control row to validate";
+    }
+
+    $("daphnia-kpi-gd").textContent = analysis.noec !== null ? `NOEC ${analysis.noec} ${unit}` : "—";
+    $("daphnia-kpi-gd-sub").textContent = `GD (>90% mobile): ${analysis.gdValue !== null ? analysis.gdValue : "—"} · LOEC: ${analysis.loec !== null ? analysis.loec : "—"}`;
+
+    if (state.activeTab === "daphnia") {
+      C.renderDaphniaCharts(analysis, unit, {
+        highlightConcs: Array.from(view.selectedConcs),
+        isolate: view.filterMode === "isolate",
+        logX: view.logX,
+      });
+    }
+
+    // Table
+    const tbl = $("daphnia-table-container");
+    if (analysis.rows.length === 0) {
+      tbl.innerHTML = `<div style="padding: 18px; text-align: center; color: var(--text-muted);">No Daphnia observations to tabulate yet.</div>`;
+    } else {
+      const body = analysis.rows
+        .map(
+          (r) => `
+          <tr data-conc-row="${r.concentration}" class="${view.selectedConcs.has(r.concentration) ? "row-highlighted" : ""}" title="Click to highlight in graphs">
+            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " ★ Ctrl" : ""}</td>
+            <td>${r.totalAnimals} (${r.replicates} rep)</td>
+            <td>${r.immob24 !== null ? `${r.immob24} (${r.pct24.toFixed(1)}%)` : "—"}</td>
+            <td>${r.immob48 !== null ? `${r.immob48} (${r.pct48.toFixed(1)}%)` : "—"}</td>
+            <td class="${formatInhClass(r.activePct)}">${r.activePct !== null ? `${r.activePct.toFixed(1)}%` : "—"}</td>
+            <td>${r.lnConc !== null ? r.lnConc.toFixed(3) : "—"}</td>
+            <td>${r.probit !== null ? r.probit.toFixed(4) : "—"}</td>
+            <td>${r.notes ? escapeHtml(r.notes) : "—"}</td>
+          </tr>`
+        )
+        .join("");
+
+      tbl.innerHTML = `
+        <table class="sci-table">
+          <thead>
+            <tr>
+              <th>Concentration</th>
+              <th>Total (N)</th>
+              <th>24 h Immob.</th>
+              <th>48 h Immob.</th>
+              <th>Active ${state.daphniaTimepoint} (%)</th>
+              <th>ln(C)</th>
+              <th>Probit (Y)</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>`;
+    }
+  }
+
+  function resetDaphniaForm() {
+    $("daphnia-edit-id").value = "";
+    $("daphnia-form-title").textContent = "New Daphnia Observation";
+    $("daphnia-submit-btn").textContent = "Add Observation";
+    $("daphnia-cancel-edit").hidden = true;
+    $("daphnia-delete-wrap").hidden = true;
+    $("daphnia-delete-wrap").open = false;
+    disarmButton($("daphnia-delete-btn"));
+    $("daphnia-conc").value = "";
+    $("daphnia-immob-24").value = "";
+    $("daphnia-immob-48").value = "";
+    $("daphnia-notes").value = "";
+  }
+
+  // ==========================================================================
+  // TAB 5: VIBRIO FISCHERI BIOLUMINESCENCE (DIN EN ISO 11348-2 L52)
+  // ==========================================================================
+
+  function renderVibrioTab() {
+    const exp = getActiveExp();
+    if (!exp) return;
+    if (!Array.isArray(exp.vibrioEntries)) exp.vibrioEntries = [];
+    const unit = exp.meta.concUnit || "mg/L";
+    const view = state.views.vibrio;
+
+    const contactTimes = Array.from(new Set(exp.vibrioEntries.map((e) => Number(e.contactMin) || 30))).sort((a, b) => a - b);
+    const contactSel = $("vibrio-filter-contact");
+    if (state.vibrioContactMin === null || !contactTimes.includes(state.vibrioContactMin)) {
+      state.vibrioContactMin = contactTimes.includes(30) ? 30 : contactTimes[0] ?? 30;
+    }
+    contactSel.innerHTML =
+      contactTimes.length > 0
+        ? contactTimes.map((t) => `<option value="${t}" ${t === state.vibrioContactMin ? "selected" : ""}>${t} min</option>`).join("")
+        : `<option value="30">30 min</option>`;
+
+    const activeForTime = exp.vibrioEntries.filter((e) => (Number(e.contactMin) || 30) === state.vibrioContactMin);
+    const uniqueConcs = Array.from(
+      new Set(activeForTime.filter((e) => e.sampleType !== "reference").map((e) => Number(e.concentration)).filter(Number.isFinite))
+    ).sort((a, b) => a - b);
+
+    const ctrlSel = $("vibrio-ctrl-conc");
+    const defaultCtrl = Number(exp.meta.controlConc ?? 0);
+    if (state.vibrioControlConc === null || !uniqueConcs.includes(state.vibrioControlConc)) {
+      state.vibrioControlConc = uniqueConcs.includes(defaultCtrl) ? defaultCtrl : uniqueConcs[0] ?? defaultCtrl;
+    }
+    ctrlSel.innerHTML =
+      uniqueConcs.length > 0
+        ? uniqueConcs.map((c) => `<option value="${c}" ${c === state.vibrioControlConc ? "selected" : ""}>${c}</option>`).join("")
+        : `<option value="${defaultCtrl}">${defaultCtrl}</option>`;
+
+    const controlConc = state.vibrioControlConc;
+    const analysis = M.analyzeVibrio(exp.vibrioEntries, {
+      controlConc,
+      contactMin: state.vibrioContactMin,
+      targetPct: view.targetPct,
+    });
+    state.lastVibrioAnalysis = analysis;
+
+    renderConcChips("vibrio-conc-chips", uniqueConcs, controlConc, unit, view);
+
+    // Entries list
+    $("vibrio-list-count").textContent = exp.vibrioEntries.length;
+    const listEl = $("vibrio-entries-list");
+    const editId = $("vibrio-edit-id").value;
+    if (exp.vibrioEntries.length === 0) {
+      listEl.innerHTML = `<div class="empty-list">No Vibrio readings yet.<br/>Add 2% NaCl controls (I₀, I₃₀) and sample wells above.</div>`;
+    } else {
+      const sorted = [...exp.vibrioEntries].sort((a, b) => Number(a.contactMin || 30) - Number(b.contactMin || 30) || Number(a.concentration) - Number(b.concentration));
+      listEl.innerHTML = sorted
+        .map((e) => {
+          const isCtrl = e.sampleType === "control" || (e.sampleType !== "reference" && Number(e.concentration) === controlConc);
+          const isRef = e.sampleType === "reference";
+          const tag = isRef ? "ZnSO₄ Ref" : `${e.concentration} ${escapeHtml(unit)}${isCtrl ? " · 2% NaCl" : ""}`;
+          return `
+            <div class="entry-item ${e.id === editId ? "editing" : ""}">
+              <div class="entry-main">
+                <div class="entry-top">
+                  <span class="entry-conc-tag ${isCtrl ? "control" : ""}">${tag}</span>
+                  <span class="entry-val">${Number(e.contactMin || 30)} min</span>
+                </div>
+                <div class="entry-sub">I₀=${e.i0} → Iₜ=${e.it}${e.well ? ` · ${escapeHtml(e.well)}` : ""}</div>
+              </div>
+              <div class="entry-actions">
+                <button type="button" class="btn btn-xs btn-ghost" data-vibrio-edit="${escapeHtml(e.id)}" title="Edit or remove reading">Edit</button>
+              </div>
+            </div>`;
+        })
+        .join("");
+    }
+
+    // KPI Cards
+    if (analysis.fkt !== null) {
+      const pill = `<span class="valid-pill ${analysis.fktValid ? "ok" : "fail"}">${analysis.fktValid ? "ISO VALID" : "OUT OF RANGE"}</span>`;
+      $("vibrio-kpi-fkt").textContent = analysis.fkt.toFixed(4);
+      $("vibrio-kpi-fkt-sub").innerHTML = `Valid 0.6–1.8 ${pill}`;
+    } else {
+      $("vibrio-kpi-fkt").textContent = "—";
+      $("vibrio-kpi-fkt-sub").textContent = "Add 2% NaCl control to compute f_kt";
+    }
+
+    const inhRows = analysis.rows.filter((r) => !r.isControl && r.inhibition !== null);
+    if (inhRows.length > 0) {
+      const maxRow = inhRows.reduce((b, c) => (c.inhibition > b.inhibition ? c : b), inhRows[0]);
+      $("vibrio-kpi-max-inh").textContent = `${maxRow.inhibition.toFixed(1)}%`;
+      $("vibrio-kpi-max-inh-sub").innerHTML = `At ${maxRow.concentration} ${escapeHtml(unit)} · ${maxRow.toxic ? '<span class="valid-pill fail">TOXIC (&gt;20%)</span>' : '<span class="valid-pill ok">NON-TOXIC</span>'}`;
+    } else {
+      $("vibrio-kpi-max-inh").textContent = "—";
+      $("vibrio-kpi-max-inh-sub").textContent = ">20% = toxic";
+    }
+
+    $("vibrio-kpi-ec-label").textContent = `Est. EC${view.targetPct} (Linear)`;
+    const ecDisp = formatIc50Card(analysis.ecTarget, unit, view.targetPct);
+    $("vibrio-kpi-ec").textContent = ecDisp.main;
+    $("vibrio-kpi-ec-sub").textContent = ecDisp.sub;
+
+    const refAvg = analysis.referenceRows.length > 0
+      ? M.mean(analysis.referenceRows.map((r) => r.inhibition).filter((v) => v !== null))
+      : null;
+    $("vibrio-kpi-lid").textContent = analysis.lid !== null ? `${analysis.lid} ${unit}` : "—";
+    $("vibrio-kpi-lid-sub").textContent = refAvg !== null ? `ZnSO₄ Ref inh: ${refAvg.toFixed(1)}%` : "Highest conc. ≤20% inh.";
+
+    if (state.activeTab === "vibrio") {
+      C.renderVibrioCharts(analysis, unit, {
+        highlightConcs: Array.from(view.selectedConcs),
+        isolate: view.filterMode === "isolate",
+        logX: view.logX,
+        showErrorBars: view.showErrorBars,
+      });
+    }
+
+    // Table
+    const tbl = $("vibrio-table-container");
+    if (analysis.rows.length === 0 && analysis.referenceRows.length === 0) {
+      tbl.innerHTML = `<div style="padding: 18px; text-align: center; color: var(--text-muted);">No Vibrio luminescence readings to tabulate yet.</div>`;
+    } else {
+      const sampleRowsHtml = analysis.rows
+        .map(
+          (r) => `
+          <tr data-conc-row="${r.concentration}" class="${view.selectedConcs.has(r.concentration) ? "row-highlighted" : ""}" title="Click to highlight in graphs">
+            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " ★ 2% NaCl Ctrl" : ""}</td>
+            <td>${r.n}</td>
+            <td>${M.formatNum(r.meanI0, 1)}</td>
+            <td>${r.meanIct !== null ? M.formatNum(r.meanIct, 1) : "—"}</td>
+            <td>${M.formatNum(r.meanIt, 1)}</td>
+            <td class="${formatInhClass(r.inhibition)}">${r.inhibition !== null ? `${r.inhibition.toFixed(2)}%` : "—"}</td>
+            <td>${r.isControl ? "Control" : r.toxic ? '<span class="valid-pill fail">Toxic (&gt;20%)</span>' : '<span class="valid-pill ok">≤20%</span>'}</td>
+          </tr>`
+        )
+        .join("");
+
+      const refRowsHtml = analysis.referenceRows
+        .map(
+          (r) => `
+          <tr>
+            <td>ZnSO₄·7H₂O Ref (${r.concentration} ${escapeHtml(unit)})</td>
+            <td>1</td>
+            <td>${M.formatNum(r.i0, 1)}</td>
+            <td>${r.ict !== null ? M.formatNum(r.ict, 1) : "—"}</td>
+            <td>${M.formatNum(r.it, 1)}</td>
+            <td class="${formatInhClass(r.inhibition)}">${r.inhibition !== null ? `${r.inhibition.toFixed(2)}%` : "—"}</td>
+            <td>Positive Ref</td>
+          </tr>`
+        )
+        .join("");
+
+      tbl.innerHTML = `
+        <table class="sci-table">
+          <thead>
+            <tr>
+              <th>Concentration / Group</th>
+              <th>n</th>
+              <th>Mean I₀</th>
+              <th>Expected Ict (I₀·f_kt)</th>
+              <th>Measured It</th>
+              <th>Hemmung (%)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>${sampleRowsHtml}${refRowsHtml}</tbody>
+        </table>`;
+    }
+  }
+
+  function resetVibrioForm() {
+    $("vibrio-edit-id").value = "";
+    $("vibrio-form-title").textContent = "New Vibrio Reading";
+    $("vibrio-submit-btn").textContent = "Add Luminescence Reading";
+    $("vibrio-cancel-edit").hidden = true;
+    $("vibrio-delete-wrap").hidden = true;
+    $("vibrio-delete-wrap").open = false;
+    disarmButton($("vibrio-delete-btn"));
+    $("vibrio-type").value = "sample";
+    $("vibrio-conc").value = "";
+    $("vibrio-well").value = "";
+    $("vibrio-i0").value = "";
+    $("vibrio-it").value = "";
+  }
+
+  // ==========================================================================
+  // DOCUMENTATION HUB & PROTOCOL DILUTION PRESETS
+  // ==========================================================================
+
+  function renderDocsHub() {
+    if (!D || !D.renderDocsList) return;
+    D.renderDocsList($("docs-cards-container"), state.docsTopic, state.docsSearch);
+  }
+
+  function applyDilutionPreset(presetKey) {
+    const exp = getActiveExp();
+    if (!exp) return;
+    const presets = {
+      daphnia: {
+        label: "Daphnia 20 mL (0–2)",
+        rows: [
+          { concentration: 0, mediumMl: 20.0, toxicantMl: 0, mediumName: "ASTM Medium", toxicantName: "Test Stock" },
+          { concentration: 0.25, mediumMl: 19.975, toxicantMl: 0.025, mediumName: "ASTM Medium", toxicantName: "Test Stock" },
+          { concentration: 0.5, mediumMl: 19.95, toxicantMl: 0.05, mediumName: "ASTM Medium", toxicantName: "Test Stock" },
+          { concentration: 1, mediumMl: 19.9, toxicantMl: 0.1, mediumName: "ASTM Medium", toxicantName: "Test Stock" },
+          { concentration: 2, mediumMl: 19.8, toxicantMl: 0.2, mediumName: "ASTM Medium", toxicantName: "Test Stock" },
+        ],
+      },
+      algae_geom: {
+        label: "Algae Geometric ≤3.2× (ISO 8692)",
+        rows: [
+          { concentration: 0, mediumMl: 10.0, toxicantMl: 0, mediumName: "BBM", toxicantName: "Stock (10 mg/L)" },
+          { concentration: 1.0, mediumMl: 9.0, toxicantMl: 1.0, mediumName: "BBM", toxicantName: "Stock (10 mg/L)" },
+          { concentration: 1.8, mediumMl: 8.2, toxicantMl: 1.8, mediumName: "BBM", toxicantName: "Stock (10 mg/L)" },
+          { concentration: 3.2, mediumMl: 6.8, toxicantMl: 3.2, mediumName: "BBM", toxicantName: "Stock (10 mg/L)" },
+          { concentration: 5.6, mediumMl: 4.4, toxicantMl: 5.6, mediumName: "BBM", toxicantName: "Stock (10 mg/L)" },
+          { concentration: 10.0, mediumMl: 0.0, toxicantMl: 10.0, mediumName: "BBM", toxicantName: "Stock (10 mg/L)" },
+        ],
+      },
+      algae_range: {
+        label: "Algae Range-Finding (0.01–100)",
+        rows: [
+          { concentration: 0, mediumMl: 10.0, toxicantMl: 0, mediumName: "BBM", toxicantName: "Stock (100 mg/L)" },
+          { concentration: 0.01, mediumMl: 9.999, toxicantMl: 0.001, mediumName: "BBM", toxicantName: "Stock (100 mg/L)" },
+          { concentration: 0.1, mediumMl: 9.99, toxicantMl: 0.01, mediumName: "BBM", toxicantName: "Stock (100 mg/L)" },
+          { concentration: 1, mediumMl: 9.9, toxicantMl: 0.1, mediumName: "BBM", toxicantName: "Stock (100 mg/L)" },
+          { concentration: 10, mediumMl: 9.0, toxicantMl: 1.0, mediumName: "BBM", toxicantName: "Stock (100 mg/L)" },
+          { concentration: 100, mediumMl: 0.0, toxicantMl: 10.0, mediumName: "BBM", toxicantName: "Stock (100 mg/L)" },
+        ],
+      },
+      algae_noec: {
+        label: "Algae Wastewater NOEC (1:1.25–1:12)",
+        rows: [
+          { concentration: 0, mediumMl: 10.0, toxicantMl: 0, mediumName: "BBM", toxicantName: "Wastewater" },
+          { concentration: 8.33, mediumMl: 9.167, toxicantMl: 0.833, mediumName: "BBM", toxicantName: "Wastewater (1:12)" },
+          { concentration: 12.5, mediumMl: 8.75, toxicantMl: 1.25, mediumName: "BBM", toxicantName: "Wastewater (1:8)" },
+          { concentration: 16.67, mediumMl: 8.333, toxicantMl: 1.667, mediumName: "BBM", toxicantName: "Wastewater (1:6)" },
+          { concentration: 25, mediumMl: 7.5, toxicantMl: 2.5, mediumName: "BBM", toxicantName: "Wastewater (1:4)" },
+          { concentration: 33.33, mediumMl: 6.667, toxicantMl: 3.333, mediumName: "BBM", toxicantName: "Wastewater (1:3)" },
+          { concentration: 50, mediumMl: 5.0, toxicantMl: 5.0, mediumName: "BBM", toxicantName: "Wastewater (1:2)" },
+          { concentration: 80, mediumMl: 2.0, toxicantMl: 8.0, mediumName: "BBM", toxicantName: "Wastewater (1:1.25)" },
+        ],
+      },
+      vibrio_serial: {
+        label: "Vibrio 1:2 Serial (2% NaCl)",
+        rows: [
+          { concentration: 0, mediumMl: 1.0, toxicantMl: 0, mediumName: "2% NaCl", toxicantName: "Salted Sample" },
+          { concentration: 6.25, mediumMl: 0.9375, toxicantMl: 0.0625, mediumName: "2% NaCl", toxicantName: "Salted Sample" },
+          { concentration: 12.5, mediumMl: 0.875, toxicantMl: 0.125, mediumName: "2% NaCl", toxicantName: "Salted Sample" },
+          { concentration: 25, mediumMl: 0.75, toxicantMl: 0.25, mediumName: "2% NaCl", toxicantName: "Salted Sample" },
+          { concentration: 50, mediumMl: 0.5, toxicantMl: 0.5, mediumName: "2% NaCl", toxicantName: "Salted Sample" },
+          { concentration: 100, mediumMl: 0.0, toxicantMl: 1.0, mediumName: "2% NaCl", toxicantName: "Salted Sample" },
+        ],
+      },
+    };
+    const chosen = presets[presetKey] || presets.daphnia;
+    const prev = [...exp.dilutions];
+    exp.dilutions = chosen.rows.map((r) => ({ id: S.uid("dil"), ...r }));
+    resetDilForm();
+    persist();
+    renderExperimentHeader();
+    renderDilutionsTab();
+    toast(`Loaded "${chosen.label}" preset`, () => {
+      exp.dilutions = prev;
+      persist();
+      renderExperimentHeader();
+      renderDilutionsTab();
+    });
+  }
+
+  // ==========================================================================
+  // TAB 6: DOCS, DILUTIONS & NOTES
   // ==========================================================================
 
   function updateDilutionMediumAuto() {
@@ -1196,7 +1652,11 @@
     $("exp-notes-textarea").value = exp.notes || "";
 
     if (state.activeTab === "dilutions") {
-      C.renderDilutionChart(sorted, unit);
+      if (state.dilChartOpen) {
+        $("dilution-chart-wrap").hidden = false;
+        C.renderDilutionChart(sorted, unit);
+      }
+      renderDocsHub();
     }
   }
 
@@ -1223,6 +1683,8 @@
     renderOdTab();
     renderCellCountTab();
     renderLemnaTab();
+    renderDaphniaTab();
+    renderVibrioTab();
     renderDilutionsTab();
   }
 
@@ -1317,6 +1779,8 @@
       if (tabName === "od") renderOdTab();
       else if (tabName === "cellcount") renderCellCountTab();
       else if (tabName === "lemna") renderLemnaTab();
+      else if (tabName === "daphnia") renderDaphniaTab();
+      else if (tabName === "vibrio") renderVibrioTab();
       else if (tabName === "dilutions") renderDilutionsTab();
     });
   }
@@ -1360,9 +1824,14 @@
           state.odControlConc = null;
           state.ccControlConc = null;
           state.lemnaControlConc = null;
+        state.daphniaControlConc = null;
+        state.vibrioControlConc = null;
+        state.vibrioContactMin = null;
           resetOdForm(false);
           resetCcForm(false);
           resetLemnaForm();
+          resetDaphniaForm();
+          resetVibrioForm();
           resetDilForm();
           persist();
           renderAll();
@@ -1400,6 +1869,8 @@
     setBtn("btn-od-clear", "Clear OD", exp.odEntries.length);
     setBtn("btn-cc-clear", "Clear Cell Counts", exp.cellCountEntries.length);
     setBtn("btn-lemna-clear", "Clear Lemna", exp.lemnaEntries.length);
+    setBtn("btn-daphnia-clear", "Clear Daphnia", (exp.daphniaEntries || []).length);
+    setBtn("btn-vibrio-clear", "Clear Vibrio", (exp.vibrioEntries || []).length);
     setBtn("btn-dil-clear", "Clear Dilutions", exp.dilutions.length);
   }
 
@@ -1410,7 +1881,7 @@
     $("exp-modal-mode").value = mode;
     const dangerZone = $("exp-danger-zone");
     dangerZone.open = false;
-    ["btn-od-clear", "btn-cc-clear", "btn-lemna-clear", "btn-dil-clear", "btn-delete-exp"].forEach((id) => disarmButton($(id)));
+    ["btn-od-clear", "btn-cc-clear", "btn-lemna-clear", "btn-daphnia-clear", "btn-vibrio-clear", "btn-dil-clear", "btn-delete-exp"].forEach((id) => disarmButton($(id)));
 
     if (mode === "create") {
       $("exp-modal-title").textContent = "Create New Experiment";
@@ -1495,10 +1966,15 @@
       state.odControlConc = null;
       state.ccControlConc = null;
       state.lemnaControlConc = null;
+        state.daphniaControlConc = null;
+        state.vibrioControlConc = null;
+        state.vibrioContactMin = null;
       resetViewSelections();
       resetOdForm(false);
       resetCcForm(false);
       resetLemnaForm();
+      resetDaphniaForm();
+      resetVibrioForm();
       resetDilForm();
       persist();
       renderAll();
@@ -1609,6 +2085,8 @@
         resetOdForm(false);
         resetCcForm(false);
         resetLemnaForm();
+        resetDaphniaForm();
+        resetVibrioForm();
         resetDilForm();
         persist();
         renderAll();
@@ -1659,10 +2137,15 @@
         state.odControlConc = null;
         state.ccControlConc = null;
         state.lemnaControlConc = null;
+        state.daphniaControlConc = null;
+        state.vibrioControlConc = null;
+        state.vibrioContactMin = null;
         resetViewSelections();
         resetOdForm(false);
         resetCcForm(false);
         resetLemnaForm();
+        resetDaphniaForm();
+        resetVibrioForm();
         resetDilForm();
         persist();
         renderAll();
@@ -2246,6 +2729,7 @@
       $("lemna-nt-a").value = item.ntA;
       $("lemna-n0-b").value = item.n0B ?? "";
       $("lemna-nt-b").value = item.ntB ?? "";
+      $("lemna-notes").value = item.notes || "";
       $("lemna-form-title").textContent = "Edit Lemna Sample";
       $("lemna-submit-btn").textContent = "Update Sample";
       $("lemna-cancel-edit").hidden = false;
@@ -2478,6 +2962,422 @@
         persist();
         $("notes-save-status").textContent = "Saved locally";
       }, 300);
+    });
+
+    // ---------- Daphnia & Probit Events ----------
+    $("daphnia-form").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const exp = getActiveExp();
+      if (!exp) return;
+      if (!Array.isArray(exp.daphniaEntries)) exp.daphniaEntries = [];
+      const editId = $("daphnia-edit-id").value;
+      const conc = Number($("daphnia-conc").value);
+      const totalAnimals = Number($("daphnia-total").value);
+      const imm24Raw = $("daphnia-immob-24").value.trim();
+      const imm48Raw = $("daphnia-immob-48").value.trim();
+      if (!Number.isFinite(conc) || !Number.isFinite(totalAnimals) || totalAnimals <= 0) return;
+      if (imm24Raw === "" && imm48Raw === "") {
+        return toast("Enter at least 24 h or 48 h immobilized count");
+      }
+      const entry = {
+        id: editId || S.uid("daph"),
+        concentration: conc,
+        totalAnimals,
+        immob24: imm24Raw === "" ? null : Math.min(totalAnimals, Math.max(0, Number(imm24Raw))),
+        immob48: imm48Raw === "" ? null : Math.min(totalAnimals, Math.max(0, Number(imm48Raw))),
+        notes: $("daphnia-notes").value.trim(),
+      };
+      if (editId) {
+        const idx = exp.daphniaEntries.findIndex((e) => e.id === editId);
+        if (idx >= 0) exp.daphniaEntries[idx] = entry;
+        toast("Daphnia entry updated");
+      } else {
+        exp.daphniaEntries.push(entry);
+        toast("Daphnia observation added");
+      }
+      resetDaphniaForm();
+      persist();
+      renderExperimentHeader();
+      renderDaphniaTab();
+    });
+
+    $("daphnia-cancel-edit").addEventListener("click", () => {
+      resetDaphniaForm();
+      renderDaphniaTab();
+    });
+
+    $("daphnia-entries-list").addEventListener("click", (ev) => {
+      const editBtn = ev.target.closest("[data-daphnia-edit]");
+      const exp = getActiveExp();
+      if (!exp || !editBtn) return;
+      const item = (exp.daphniaEntries || []).find((e) => e.id === editBtn.dataset.daphniaEdit);
+      if (!item) return;
+      $("daphnia-edit-id").value = item.id;
+      $("daphnia-conc").value = item.concentration;
+      $("daphnia-total").value = item.totalAnimals;
+      $("daphnia-immob-24").value = item.immob24 ?? "";
+      $("daphnia-immob-48").value = item.immob48 ?? "";
+      $("daphnia-notes").value = item.notes || "";
+      $("daphnia-form-title").textContent = "Edit Daphnia Observation";
+      $("daphnia-submit-btn").textContent = "Update Observation";
+      $("daphnia-cancel-edit").hidden = false;
+      $("daphnia-delete-wrap").hidden = false;
+      $("daphnia-delete-wrap").open = false;
+      disarmButton($("daphnia-delete-btn"));
+      renderDaphniaTab();
+    });
+
+    $("daphnia-delete-btn").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const id = $("daphnia-edit-id").value;
+      if (!exp || !id) return;
+      handleArmedClick($("daphnia-delete-btn"), "Confirm Delete", () => {
+        const idx = exp.daphniaEntries.findIndex((e) => e.id === id);
+        if (idx < 0) return;
+        const removed = exp.daphniaEntries[idx];
+        exp.daphniaEntries.splice(idx, 1);
+        resetDaphniaForm();
+        persist();
+        renderExperimentHeader();
+        renderDaphniaTab();
+        toast("Daphnia observation deleted", () => {
+          exp.daphniaEntries.splice(idx, 0, removed);
+          persist();
+          renderExperimentHeader();
+          renderDaphniaTab();
+        });
+      });
+    });
+
+    $("btn-daphnia-clear").addEventListener("click", () => {
+      const exp = getActiveExp();
+      if (!exp || !exp.daphniaEntries || exp.daphniaEntries.length === 0) return;
+      handleArmedClick($("btn-daphnia-clear"), `Confirm Clear (${exp.daphniaEntries.length})`, () => {
+        const snapshot = [...exp.daphniaEntries];
+        exp.daphniaEntries = [];
+        resetDaphniaForm();
+        persist();
+        refreshDangerZoneCounts(exp);
+        renderExperimentHeader();
+        renderDaphniaTab();
+        toast(`Cleared ${snapshot.length} Daphnia entries`, () => {
+          exp.daphniaEntries = snapshot;
+          persist();
+          refreshDangerZoneCounts(exp);
+          renderExperimentHeader();
+          renderDaphniaTab();
+        });
+      });
+    });
+
+    $("daphnia-ctrl-conc").addEventListener("change", (ev) => {
+      state.daphniaControlConc = Number(ev.target.value);
+      renderDaphniaTab();
+    });
+    $("daphnia-timepoint").addEventListener("change", (ev) => {
+      state.daphniaTimepoint = ev.target.value === "24h" ? "24h" : "48h";
+      renderDaphniaTab();
+    });
+    $("daphnia-ec-target").addEventListener("change", (ev) => {
+      state.views.daphnia.targetPct = Number(ev.target.value) || 50;
+      renderDaphniaTab();
+    });
+    $("daphnia-conc-chips").addEventListener("click", (ev) => {
+      const reset = ev.target.closest("[data-chip-reset]");
+      if (reset) {
+        state.views.daphnia.selectedConcs.clear();
+        renderDaphniaTab();
+        return;
+      }
+      const chip = ev.target.closest("[data-chip-conc]");
+      if (chip) toggleConcSelection("daphnia", chip.dataset.chipConc, renderDaphniaTab);
+    });
+    $("daphnia-filter-mode").addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-mode]");
+      if (!btn) return;
+      state.views.daphnia.filterMode = btn.dataset.mode;
+      $("daphnia-filter-mode").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      renderDaphniaTab();
+    });
+    $("daphnia-toggle-abbott").addEventListener("click", () => {
+      state.views.daphnia.useAbbott = !state.views.daphnia.useAbbott;
+      $("daphnia-toggle-abbott").classList.toggle("active", state.views.daphnia.useAbbott);
+      $("daphnia-toggle-abbott").setAttribute("aria-pressed", String(state.views.daphnia.useAbbott));
+      renderDaphniaTab();
+    });
+    $("daphnia-toggle-logx").addEventListener("click", () => {
+      state.views.daphnia.logX = !state.views.daphnia.logX;
+      $("daphnia-toggle-logx").classList.toggle("active", state.views.daphnia.logX);
+      $("daphnia-toggle-logx").setAttribute("aria-pressed", String(state.views.daphnia.logX));
+      renderDaphniaTab();
+    });
+    $("daphnia-table-container").addEventListener("click", (ev) => {
+      const tr = ev.target.closest("tr[data-conc-row]");
+      if (tr) toggleConcSelection("daphnia", tr.dataset.concRow, renderDaphniaTab);
+    });
+    $("btn-daphnia-export-csv").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const a = state.lastDaphniaAnalysis;
+      if (!exp || !a || a.rows.length === 0) return toast("No Daphnia data to export");
+      const headers = ["Concentration", "Is_Control", "Total_N", "Replicates", "Immob_24h", "Pct_24h", "Immob_48h", "Pct_48h", "Active_Pct", "ln_C", "Probit_Y", "Notes"];
+      const rows = a.rows.map((r) => [
+        r.concentration, r.isControl, r.totalAnimals, r.replicates,
+        r.immob24 ?? "", r.pct24 !== null ? r.pct24.toFixed(2) : "",
+        r.immob48 ?? "", r.pct48 !== null ? r.pct48.toFixed(2) : "",
+        r.activePct !== null ? r.activePct.toFixed(2) : "",
+        r.lnConc !== null ? r.lnConc.toFixed(4) : "",
+        r.probit !== null ? r.probit.toFixed(4) : "",
+        r.notes || "",
+      ]);
+      S.downloadFile(`${slugify(exp.name)}_daphnia_probit.csv`, S.toCSV(headers, rows), "text/csv");
+      toast("Exported Daphnia & Probit CSV");
+    });
+
+    // ---------- Vibrio fischeri Events ----------
+    $("vibrio-type").addEventListener("change", (ev) => {
+      if (ev.target.value === "control" && $("vibrio-conc").value === "") {
+        $("vibrio-conc").value = "0";
+      } else if (ev.target.value === "reference" && $("vibrio-conc").value === "") {
+        $("vibrio-conc").value = "219.8";
+      }
+    });
+
+    $("vibrio-form").addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const exp = getActiveExp();
+      if (!exp) return;
+      if (!Array.isArray(exp.vibrioEntries)) exp.vibrioEntries = [];
+      const editId = $("vibrio-edit-id").value;
+      const sampleType = $("vibrio-type").value || "sample";
+      const contactMin = Number($("vibrio-contact").value) || 30;
+      const conc = Number($("vibrio-conc").value);
+      const i0 = Number($("vibrio-i0").value);
+      const it = Number($("vibrio-it").value);
+      if (!Number.isFinite(conc) || !Number.isFinite(i0) || i0 <= 0 || !Number.isFinite(it) || it < 0) return;
+
+      const entry = {
+        id: editId || S.uid("vib"),
+        sampleType,
+        contactMin,
+        concentration: conc,
+        well: $("vibrio-well").value.trim(),
+        i0,
+        it,
+      };
+      if (editId) {
+        const idx = exp.vibrioEntries.findIndex((e) => e.id === editId);
+        if (idx >= 0) exp.vibrioEntries[idx] = entry;
+        toast("Vibrio reading updated");
+      } else {
+        exp.vibrioEntries.push(entry);
+        toast("Vibrio reading added");
+      }
+      state.vibrioContactMin = contactMin;
+      resetVibrioForm();
+      persist();
+      renderExperimentHeader();
+      renderVibrioTab();
+    });
+
+    $("vibrio-cancel-edit").addEventListener("click", () => {
+      resetVibrioForm();
+      renderVibrioTab();
+    });
+
+    $("vibrio-entries-list").addEventListener("click", (ev) => {
+      const editBtn = ev.target.closest("[data-vibrio-edit]");
+      const exp = getActiveExp();
+      if (!exp || !editBtn) return;
+      const item = (exp.vibrioEntries || []).find((e) => e.id === editBtn.dataset.vibrioEdit);
+      if (!item) return;
+      $("vibrio-edit-id").value = item.id;
+      $("vibrio-type").value = item.sampleType || "sample";
+      $("vibrio-contact").value = String(item.contactMin || 30);
+      $("vibrio-conc").value = item.concentration;
+      $("vibrio-well").value = item.well || "";
+      $("vibrio-i0").value = item.i0;
+      $("vibrio-it").value = item.it;
+      $("vibrio-form-title").textContent = "Edit Vibrio Reading";
+      $("vibrio-submit-btn").textContent = "Update Reading";
+      $("vibrio-cancel-edit").hidden = false;
+      $("vibrio-delete-wrap").hidden = false;
+      $("vibrio-delete-wrap").open = false;
+      disarmButton($("vibrio-delete-btn"));
+      renderVibrioTab();
+    });
+
+    $("vibrio-delete-btn").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const id = $("vibrio-edit-id").value;
+      if (!exp || !id) return;
+      handleArmedClick($("vibrio-delete-btn"), "Confirm Delete", () => {
+        const idx = exp.vibrioEntries.findIndex((e) => e.id === id);
+        if (idx < 0) return;
+        const removed = exp.vibrioEntries[idx];
+        exp.vibrioEntries.splice(idx, 1);
+        resetVibrioForm();
+        persist();
+        renderExperimentHeader();
+        renderVibrioTab();
+        toast("Vibrio reading deleted", () => {
+          exp.vibrioEntries.splice(idx, 0, removed);
+          persist();
+          renderExperimentHeader();
+          renderVibrioTab();
+        });
+      });
+    });
+
+    $("btn-vibrio-clear").addEventListener("click", () => {
+      const exp = getActiveExp();
+      if (!exp || !exp.vibrioEntries || exp.vibrioEntries.length === 0) return;
+      handleArmedClick($("btn-vibrio-clear"), `Confirm Clear (${exp.vibrioEntries.length})`, () => {
+        const snapshot = [...exp.vibrioEntries];
+        exp.vibrioEntries = [];
+        resetVibrioForm();
+        persist();
+        refreshDangerZoneCounts(exp);
+        renderExperimentHeader();
+        renderVibrioTab();
+        toast(`Cleared ${snapshot.length} Vibrio readings`, () => {
+          exp.vibrioEntries = snapshot;
+          persist();
+          refreshDangerZoneCounts(exp);
+          renderExperimentHeader();
+          renderVibrioTab();
+        });
+      });
+    });
+
+    $("vibrio-filter-contact").addEventListener("change", (ev) => {
+      state.vibrioContactMin = Number(ev.target.value) || 30;
+      renderVibrioTab();
+    });
+    $("vibrio-ctrl-conc").addEventListener("change", (ev) => {
+      state.vibrioControlConc = Number(ev.target.value);
+      renderVibrioTab();
+    });
+    $("vibrio-ec-target").addEventListener("change", (ev) => {
+      state.views.vibrio.targetPct = Number(ev.target.value) || 50;
+      renderVibrioTab();
+    });
+    $("vibrio-conc-chips").addEventListener("click", (ev) => {
+      const reset = ev.target.closest("[data-chip-reset]");
+      if (reset) {
+        state.views.vibrio.selectedConcs.clear();
+        renderVibrioTab();
+        return;
+      }
+      const chip = ev.target.closest("[data-chip-conc]");
+      if (chip) toggleConcSelection("vibrio", chip.dataset.chipConc, renderVibrioTab);
+    });
+    $("vibrio-filter-mode").addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-mode]");
+      if (!btn) return;
+      state.views.vibrio.filterMode = btn.dataset.mode;
+      $("vibrio-filter-mode").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      renderVibrioTab();
+    });
+    $("vibrio-toggle-sd").addEventListener("click", () => {
+      state.views.vibrio.showErrorBars = !state.views.vibrio.showErrorBars;
+      $("vibrio-toggle-sd").classList.toggle("active", state.views.vibrio.showErrorBars);
+      $("vibrio-toggle-sd").setAttribute("aria-pressed", String(state.views.vibrio.showErrorBars));
+      renderVibrioTab();
+    });
+    $("vibrio-toggle-logx").addEventListener("click", () => {
+      state.views.vibrio.logX = !state.views.vibrio.logX;
+      $("vibrio-toggle-logx").classList.toggle("active", state.views.vibrio.logX);
+      $("vibrio-toggle-logx").setAttribute("aria-pressed", String(state.views.vibrio.logX));
+      renderVibrioTab();
+    });
+    $("vibrio-table-container").addEventListener("click", (ev) => {
+      const tr = ev.target.closest("tr[data-conc-row]");
+      if (tr) toggleConcSelection("vibrio", tr.dataset.concRow, renderVibrioTab);
+    });
+    $("btn-vibrio-export-csv").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const a = state.lastVibrioAnalysis;
+      if (!exp || !a || a.rows.length === 0) return toast("No Vibrio data to export");
+      const headers = ["Concentration", "Is_Control", "n", "Mean_I0", "f_kt", "Expected_Ict", "Mean_It", "Inhibition_Pct", "Toxic_Over_20Pct"];
+      const rows = a.rows.map((r) => [
+        r.concentration, r.isControl, r.n,
+        M.formatNum(r.meanI0, 2),
+        a.fkt !== null ? a.fkt.toFixed(5) : "",
+        r.meanIct !== null ? M.formatNum(r.meanIct, 2) : "",
+        r.meanIt !== null ? M.formatNum(r.meanIt, 2) : "",
+        r.inhibition !== null ? r.inhibition.toFixed(2) : "",
+        r.toxic,
+      ]);
+      S.downloadFile(`${slugify(exp.name)}_vibrio_${state.vibrioContactMin}min.csv`, S.toCSV(headers, rows), "text/csv");
+      toast("Exported Vibrio Bioluminescence CSV");
+    });
+
+    // ---------- Documentation Hub, Notes Timestamp & Dilution Chart Toggle ----------
+    $("btn-notes-timestamp").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const ta = $("exp-notes-textarea");
+      if (!exp || !ta) return;
+      const stamp = `[${todayIso()} ${nowTimeHm()}] `;
+      ta.value = ta.value ? `${ta.value.trimEnd()}\n${stamp}` : stamp;
+      exp.notes = ta.value;
+      persist();
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = ta.value.length;
+      $("notes-save-status").textContent = "Saved locally";
+    });
+
+    $("btn-dil-toggle-chart").addEventListener("click", () => {
+      state.dilChartOpen = !state.dilChartOpen;
+      const wrap = $("dilution-chart-wrap");
+      wrap.hidden = !state.dilChartOpen;
+      if (state.dilChartOpen) {
+        const exp = getActiveExp();
+        if (exp) {
+          const sorted = [...exp.dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
+          C.renderDilutionChart(sorted, exp.meta.concUnit || "mg/L");
+        }
+      }
+    });
+
+    $("docs-topic-pills").addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-doc-topic]");
+      if (!btn) return;
+      state.docsTopic = btn.dataset.docTopic;
+      $("docs-topic-pills").querySelectorAll("[data-doc-topic]").forEach((b) => b.classList.toggle("active", b === btn));
+      renderDocsHub();
+    });
+
+    $("docs-search-input").addEventListener("input", (ev) => {
+      state.docsSearch = ev.target.value;
+      renderDocsHub();
+    });
+
+    $("docs-cards-container").addEventListener("click", (ev) => {
+      const gotoBtn = ev.target.closest("[data-doc-goto]");
+      if (gotoBtn) {
+        switchTab(gotoBtn.dataset.docGoto);
+        return;
+      }
+      const presetBtn = ev.target.closest("[data-doc-preset]");
+      if (presetBtn) {
+        $("dil-preset-select").value = presetBtn.dataset.docPreset;
+        applyDilutionPreset(presetBtn.dataset.docPreset);
+        return;
+      }
+      const noteBtn = ev.target.closest("[data-doc-note]");
+      if (noteBtn && D && D.getChecklistForId) {
+        const exp = getActiveExp();
+        const ta = $("exp-notes-textarea");
+        const checklist = D.getChecklistForId(noteBtn.dataset.docNote);
+        if (exp && ta && checklist) {
+          ta.value = ta.value ? `${ta.value.trimEnd()}\n\n${checklist}\n` : `${checklist}\n`;
+          exp.notes = ta.value;
+          persist();
+          $("notes-save-status").textContent = "Saved locally";
+          toast("Protocol checklist appended to Lab Notes");
+          ta.scrollTop = ta.scrollHeight;
+        }
+      }
     });
   }
 

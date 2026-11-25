@@ -366,6 +366,102 @@
       `);
     }
 
+    // ---------------- 3B. DAPHNIA MAGNA & PROBIT SECTION ----------------
+    if (exp.daphniaEntries && exp.daphniaEntries.length > 0) {
+      const analysis = M.analyzeDaphnia(exp.daphniaEntries, { controlConc: defaultCtrl, timepoint: "48h", targetPct: 50 });
+      let chartImages = [];
+      if (renderImages && C.buildDaphniaSpecs) {
+        const specs = C.buildDaphniaSpecs(analysis, unit, true);
+        for (const spec of [specs.dose, specs.probit, specs.mobility].filter(Boolean)) {
+          chartImages.push(await C.renderSpecToImage(spec, 760, 420));
+        }
+      }
+      const rowsHtml = analysis.rows
+        .map(
+          (r) => `
+          <tr>
+            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " (Ctrl)" : ""}</td>
+            <td>${r.totalAnimals} (${r.replicates} rep)</td>
+            <td>${r.immob24 !== null ? `${r.immob24} (${r.pct24.toFixed(1)}%)` : "—"}</td>
+            <td>${r.immob48 !== null ? `${r.immob48} (${r.pct48.toFixed(1)}%)` : "—"}</td>
+            <td>${r.lnConc !== null ? r.lnConc.toFixed(3) : "—"}</td>
+            <td>${r.probit !== null ? r.probit.toFixed(3) : "—"}</td>
+          </tr>`
+        )
+        .join("");
+
+      const ecVal = analysis.primaryEC ? `${analysis.primaryEC.value.toFixed(4)} ${escapeHtml(unit)}` : "—";
+      const ecSub = analysis.primaryEC ? `${analysis.primaryEC.method} · ${analysis.primaryEC.detail}` : "Insufficient data";
+      const validStr = analysis.validity.okActive === null ? "No control" : analysis.validity.okActive ? "PASS (≤10%)" : "FAIL (>10%)";
+      sections.push(`
+        <section class="report-section">
+          <h2>Daphnia magna Acute Immobilization &amp; Probit Analysis (OECD 202 / DIN 38412 L30)</h2>
+          <div class="kpi-grid">
+            <div class="kpi"><div class="kpi-label">Est. EC50 (48 h)</div><div class="kpi-val danger">${ecVal}</div><div class="kpi-sub">${escapeHtml(ecSub)}</div></div>
+            <div class="kpi"><div class="kpi-label">Probit R&sup2; / Geom. Mean</div><div class="kpi-val accent">${analysis.probit && analysis.probit.r2 !== null ? analysis.probit.r2.toFixed(4) : "—"}</div><div class="kpi-sub">${analysis.geomMeanEC50 ? `√(${analysis.geomMeanEC50.a}·${analysis.geomMeanEC50.b}) = ${analysis.geomMeanEC50.value.toFixed(4)} ${escapeHtml(unit)}` : "—"}</div></div>
+            <div class="kpi"><div class="kpi-label">OECD 202 Control Validity</div><div class="kpi-val">${validStr}</div><div class="kpi-sub">48 h ctrl: ${analysis.controlPct48 !== null ? analysis.controlPct48.toFixed(1) + "%" : "—"}</div></div>
+            <div class="kpi"><div class="kpi-label">GD / NOEC / LOEC</div><div class="kpi-val">${analysis.noec !== null ? `${analysis.noec} ${escapeHtml(unit)}` : "—"}</div><div class="kpi-sub">GD: ${analysis.gdValue !== null ? analysis.gdValue : "—"} · LOEC: ${analysis.loec !== null ? analysis.loec : "—"}</div></div>
+          </div>
+          ${renderChartsGridHtml(chartImages)}
+          <h3>Daphnia Immobilization &amp; Probit Table</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Concentration</th><th>Total (N)</th><th>24 h Immob.</th><th>48 h Immob.</th><th>ln(C)</th><th>Probit (48 h)</th></tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </section>
+      `);
+    }
+
+    // ---------------- 3C. VIBRIO FISCHERI SECTION ----------------
+    if (exp.vibrioEntries && exp.vibrioEntries.length > 0) {
+      const analysis = M.analyzeVibrio(exp.vibrioEntries, { controlConc: defaultCtrl });
+      let chartImages = [];
+      if (renderImages && C.buildVibrioSpecs) {
+        const specs = C.buildVibrioSpecs(analysis, unit, true);
+        for (const spec of [specs.inhibition, specs.luminescence].filter(Boolean)) {
+          chartImages.push(await C.renderSpecToImage(spec, 760, 420));
+        }
+      }
+      const rowsHtml = analysis.rows
+        .map(
+          (r) => `
+          <tr>
+            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " (2% NaCl Ctrl)" : ""}</td>
+            <td>${r.n}</td>
+            <td>${M.formatNum(r.meanI0, 1)}</td>
+            <td>${r.meanIct !== null ? M.formatNum(r.meanIct, 1) : "—"}</td>
+            <td>${M.formatNum(r.meanIt, 1)}</td>
+            <td class="${inhClass(r.inhibition)}">${r.inhibition !== null ? `${r.inhibition.toFixed(2)}%` : "—"}</td>
+            <td>${r.isControl ? "Control" : r.toxic ? "Toxic (>20%)" : "Non-toxic (≤20%)"}</td>
+          </tr>`
+        )
+        .join("");
+
+      const ec50 = formatIc50(analysis.ec50, unit);
+      const ec20 = formatIc50(analysis.ec20, unit);
+      sections.push(`
+        <section class="report-section">
+          <h2>Vibrio fischeri Bioluminescence Inhibition (DIN EN ISO 11348-2)</h2>
+          <div class="kpi-grid">
+            <div class="kpi"><div class="kpi-label">Correction Factor f_kt</div><div class="kpi-val accent">${analysis.fkt !== null ? analysis.fkt.toFixed(4) : "—"}</div><div class="kpi-sub">${analysis.fktValid === null ? "Control missing" : analysis.fktValid ? "Valid (0.6–1.8)" : "Out of range (0.6–1.8)"}</div></div>
+            <div class="kpi"><div class="kpi-label">Est. EC20 (Toxic)</div><div class="kpi-val">${escapeHtml(ec20.val)}</div><div class="kpi-sub">${escapeHtml(ec20.sub)}</div></div>
+            <div class="kpi"><div class="kpi-label">Est. EC50</div><div class="kpi-val danger">${escapeHtml(ec50.val)}</div><div class="kpi-sub">${escapeHtml(ec50.sub)}</div></div>
+            <div class="kpi"><div class="kpi-label">LID / G_L</div><div class="kpi-val">${analysis.lid !== null ? `${analysis.lid} ${escapeHtml(unit)}` : "—"}</div><div class="kpi-sub">Highest conc. ≤20% inh.</div></div>
+          </div>
+          ${renderChartsGridHtml(chartImages)}
+          <h3>Bioluminescence Summary Table</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Concentration</th><th>n</th><th>Mean I&sub0;</th><th>Expected I<sub>ct</sub></th><th>Measured I<sub>t</sub></th><th>Inhibition (%)</th><th>Status</th></tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </section>
+      `);
+    }
+
     // ---------------- 4. DILUTION SERIES SECTION ----------------
     if (exp.dilutions && exp.dilutions.length > 0) {
       const sorted = [...exp.dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
