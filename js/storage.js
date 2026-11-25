@@ -142,7 +142,12 @@
    * 2) { experiments: [...], activeExperimentId? } (workspace backup)
    * 3) Raw experiment object { name, odEntries/cellCountEntries/lemnaEntries }
    */
-  function parseSaveFile(jsonText) {
+  function parseSaveFile(rawText) {
+    let jsonText = String(rawText || "").trim();
+    const embeddedMatch = jsonText.match(/<script[^>]*id=["']ecotox-save-data["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (embeddedMatch) {
+      jsonText = embeddedMatch[1].replace(/<\\\/script/gi, "</script").trim();
+    }
     const parsed = JSON.parse(jsonText);
     if (!parsed || typeof parsed !== "object") {
       throw new Error("Save file does not contain a valid JSON object.");

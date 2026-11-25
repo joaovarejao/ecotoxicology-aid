@@ -9,6 +9,7 @@
   <script src="js/math.js" defer></script>
   <script src="js/storage.js" defer></script>
   <script src="js/charts.js" defer></script>
+  <script src="js/exporter.js" defer></script>
   <script src="js/app.js" defer></script>
 </head>
 <body>
@@ -33,9 +34,10 @@
 
     <div class="topbar-actions">
       <button type="button" id="btn-open-save" class="btn btn-sm" title="Open a local experiment or workspace .json save file">Open File</button>
-      <button type="button" id="btn-save-exp" class="btn btn-sm" title="Save active experiment to a local .json file">Save File</button>
+      <button type="button" id="btn-save-exp" class="btn btn-sm" title="Save active experiment to a local .json file">Save JSON</button>
+      <button type="button" id="btn-export-html" class="btn btn-sm" title="Export active experiment as a standalone HTML report with charts">Export HTML</button>
       <button type="button" id="btn-export-json" class="btn btn-sm btn-ghost" title="Export all experiments as workspace JSON">Backup All</button>
-      <input type="file" id="import-file-input" accept=".json,application/json" hidden />
+      <input type="file" id="import-file-input" accept=".json,.html,application/json,text/html" hidden />
       <button type="button" id="btn-theme-toggle" class="btn btn-icon" title="Toggle light/dark theme" aria-label="Toggle theme">☀</button>
     </div>
   </header>
@@ -143,30 +145,55 @@
       <!-- RIGHT: Analysis Controls, KPIs, 4 Interactive Charts & Tables -->
       <section class="panel-right">
         <div class="analysis-bar">
-          <div class="analysis-filters">
-            <label class="inline-control">
-              Wavelength
-              <select id="od-ctrl-wavelength"></select>
-            </label>
-            <label class="inline-control">
-              Control Conc.
-              <select id="od-ctrl-conc"></select>
-            </label>
-            <label class="inline-control" title="Optional exponential phase start (elapsed hours)">
-              t_start (h)
-              <input type="number" step="any" min="0" id="od-t-start" placeholder="auto" />
-            </label>
-            <label class="inline-control" title="Optional exponential phase end (elapsed hours)">
-              t_end (h)
-              <input type="number" step="any" min="0" id="od-t-end" placeholder="auto" />
-            </label>
+          <div class="analysis-row">
+            <div class="analysis-filters">
+              <label class="inline-control">
+                Wavelength
+                <select id="od-ctrl-wavelength"></select>
+              </label>
+              <label class="inline-control" title="Selected control is starred ★ across all charts">
+                Control Conc.
+                <select id="od-ctrl-conc"></select>
+              </label>
+              <label class="inline-control" title="Exponential phase start — shades fit window on graphs">
+                t_start (h)
+                <input type="number" step="any" min="0" id="od-t-start" placeholder="auto" />
+              </label>
+              <label class="inline-control" title="Exponential phase end — shades fit window on graphs">
+                t_end (h)
+                <input type="number" step="any" min="0" id="od-t-end" placeholder="auto" />
+              </label>
+              <label class="inline-control" title="Inhibition threshold line &amp; interpolated endpoint">
+                Endpoint
+                <select id="od-ic-target">
+                  <option value="50" selected>IC50 (50%)</option>
+                  <option value="20">IC20 (20%)</option>
+                  <option value="10">IC10 (10%)</option>
+                </select>
+              </label>
+            </div>
+            <button type="button" id="btn-od-export-csv" class="btn btn-sm">Export Tables CSV</button>
           </div>
-          <button type="button" id="btn-od-export-csv" class="btn btn-sm">Export Tables CSV</button>
+          <div class="chart-manip-bar">
+            <div class="conc-chips-group">
+              <span class="manip-label">Concentrations</span>
+              <div class="conc-chips" id="od-conc-chips"></div>
+              <div class="segmented segmented-xs" id="od-filter-mode" title="Highlight dims other curves; Isolate hides them to rescale Y-axis">
+                <button type="button" class="active" data-mode="highlight">Highlight</button>
+                <button type="button" data-mode="isolate">Isolate</button>
+              </div>
+            </div>
+            <div class="chart-toggles">
+              <button type="button" class="toggle-pill active" id="od-toggle-sd" aria-pressed="true" title="Toggle ± SD error bars">± SD</button>
+              <button type="button" class="toggle-pill" id="od-toggle-fit" aria-pressed="false" title="Overlay OLS linear regression lines on Semi-Log plot">Fit Lines</button>
+              <button type="button" class="toggle-pill" id="od-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
+            </div>
+          </div>
         </div>
 
         <div class="kpi-grid" id="od-kpis">
           <div class="kpi-card">
-            <div class="kpi-label">Control μ (h⁻¹)</div>
+            <div class="kpi-label">Control <span class="keep-case">μ (h⁻¹)</span></div>
             <div class="kpi-value accent" id="od-kpi-ctrl-mu">—</div>
             <div class="kpi-sub" id="od-kpi-ctrl-r2">Exponential fit R²</div>
           </div>
@@ -176,7 +203,7 @@
             <div class="kpi-sub" id="od-kpi-max-inh-conc">Highest observed</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-label">Est. IC50 (Linear)</div>
+            <div class="kpi-label" id="od-kpi-ic50-label">Est. IC50 (Linear)</div>
             <div class="kpi-value" id="od-kpi-ic50">—</div>
             <div class="kpi-sub" id="od-kpi-ic50-sub">50% inhibition threshold</div>
           </div>
@@ -306,21 +333,46 @@
       <!-- RIGHT: Kinetics Graphs, Inoculation Calculator & Tables -->
       <section class="panel-right">
         <div class="analysis-bar">
-          <div class="analysis-filters">
-            <label class="inline-control">
-              Control Conc.
-              <select id="cc-ctrl-conc"></select>
-            </label>
-            <label class="inline-control">
-              t_start (h)
-              <input type="number" step="any" min="0" id="cc-t-start" placeholder="auto" />
-            </label>
-            <label class="inline-control">
-              t_end (h)
-              <input type="number" step="any" min="0" id="cc-t-end" placeholder="auto" />
-            </label>
+          <div class="analysis-row">
+            <div class="analysis-filters">
+              <label class="inline-control" title="Selected control is starred ★ across all charts">
+                Control Conc.
+                <select id="cc-ctrl-conc"></select>
+              </label>
+              <label class="inline-control" title="Exponential phase start — shades fit window on graphs">
+                t_start (h)
+                <input type="number" step="any" min="0" id="cc-t-start" placeholder="auto" />
+              </label>
+              <label class="inline-control" title="Exponential phase end — shades fit window on graphs">
+                t_end (h)
+                <input type="number" step="any" min="0" id="cc-t-end" placeholder="auto" />
+              </label>
+              <label class="inline-control">
+                Endpoint
+                <select id="cc-ic-target">
+                  <option value="50" selected>IC50 (50%)</option>
+                  <option value="20">IC20 (20%)</option>
+                  <option value="10">IC10 (10%)</option>
+                </select>
+              </label>
+            </div>
+            <button type="button" id="btn-cc-export-csv" class="btn btn-sm">Export Tables CSV</button>
           </div>
-          <button type="button" id="btn-cc-export-csv" class="btn btn-sm">Export Tables CSV</button>
+          <div class="chart-manip-bar">
+            <div class="conc-chips-group">
+              <span class="manip-label">Concentrations</span>
+              <div class="conc-chips" id="cc-conc-chips"></div>
+              <div class="segmented segmented-xs" id="cc-filter-mode" title="Highlight dims other curves; Isolate hides them to rescale Y-axis">
+                <button type="button" class="active" data-mode="highlight">Highlight</button>
+                <button type="button" data-mode="isolate">Isolate</button>
+              </div>
+            </div>
+            <div class="chart-toggles">
+              <button type="button" class="toggle-pill active" id="cc-toggle-sd" aria-pressed="true" title="Toggle ± SD error bars">± SD</button>
+              <button type="button" class="toggle-pill" id="cc-toggle-fit" aria-pressed="false" title="Overlay OLS linear regression lines on Semi-Log plot">Fit Lines</button>
+              <button type="button" class="toggle-pill" id="cc-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
+            </div>
+          </div>
         </div>
 
         <div class="kpi-grid">
@@ -330,12 +382,12 @@
             <div class="kpi-sub">cells/mL (mean)</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-label">Control μ (h⁻¹)</div>
+            <div class="kpi-label">Control <span class="keep-case">μ (h⁻¹)</span></div>
             <div class="kpi-value" id="cc-kpi-ctrl-mu">—</div>
             <div class="kpi-sub" id="cc-kpi-ctrl-r2">Requires ≥ 2 timepoints</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-label">Est. IC50 (Linear)</div>
+            <div class="kpi-label" id="cc-kpi-ic50-label">Est. IC50 (Linear)</div>
             <div class="kpi-value crimson" id="cc-kpi-ic50">—</div>
             <div class="kpi-sub" id="cc-kpi-ic50-sub">50% inhibition threshold</div>
           </div>
@@ -452,18 +504,42 @@
       <!-- RIGHT: Lemna Charts & Summary Table -->
       <section class="panel-right">
         <div class="analysis-bar">
-          <div class="analysis-filters">
-            <label class="inline-control">
-              Control Conc.
-              <select id="lemna-ctrl-conc"></select>
-            </label>
+          <div class="analysis-row">
+            <div class="analysis-filters">
+              <label class="inline-control" title="Selected control is starred ★ across all charts">
+                Control Conc.
+                <select id="lemna-ctrl-conc"></select>
+              </label>
+              <label class="inline-control">
+                Endpoint
+                <select id="lemna-ic-target">
+                  <option value="50" selected>IC50 (50%)</option>
+                  <option value="20">IC20 (20%)</option>
+                  <option value="10">IC10 (10%)</option>
+                </select>
+              </label>
+            </div>
+            <button type="button" id="btn-lemna-export-csv" class="btn btn-sm">Export Lemna CSV</button>
           </div>
-          <button type="button" id="btn-lemna-export-csv" class="btn btn-sm">Export Lemna CSV</button>
+          <div class="chart-manip-bar">
+            <div class="conc-chips-group">
+              <span class="manip-label">Concentrations</span>
+              <div class="conc-chips" id="lemna-conc-chips"></div>
+              <div class="segmented segmented-xs" id="lemna-filter-mode">
+                <button type="button" class="active" data-mode="highlight">Highlight</button>
+                <button type="button" data-mode="isolate">Isolate</button>
+              </div>
+            </div>
+            <div class="chart-toggles">
+              <button type="button" class="toggle-pill active" id="lemna-toggle-sd" aria-pressed="true" title="Toggle ± SD error bars">± SD</button>
+              <button type="button" class="toggle-pill" id="lemna-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
+            </div>
+          </div>
         </div>
 
         <div class="kpi-grid">
           <div class="kpi-card">
-            <div class="kpi-label">Control μ (h⁻¹)</div>
+            <div class="kpi-label">Control <span class="keep-case">μ (h⁻¹)</span></div>
             <div class="kpi-value accent" id="lemna-kpi-ctrl-mu">—</div>
             <div class="kpi-sub" id="lemna-kpi-ctrl-td">Doubling time</div>
           </div>
@@ -473,7 +549,7 @@
             <div class="kpi-sub" id="lemna-kpi-max-inh-conc">Highest observed</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-label">Est. IC50 (Linear)</div>
+            <div class="kpi-label" id="lemna-kpi-ic50-label">Est. IC50 (Linear)</div>
             <div class="kpi-value" id="lemna-kpi-ic50">—</div>
             <div class="kpi-sub" id="lemna-kpi-ic50-sub">50% inhibition threshold</div>
           </div>
@@ -677,6 +753,9 @@
       </form>
     </div>
   </div>
+
+  <!-- ================= FULLSIZE CHART BACKDROP ================= -->
+  <div class="chart-backdrop" id="chart-fullscreen-backdrop" aria-hidden="true"></div>
 
   <!-- ================= TOAST CONTAINER ================= -->
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>

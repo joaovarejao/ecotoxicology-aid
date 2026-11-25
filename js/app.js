@@ -25,7 +25,63 @@
     lastOdAnalysis: null,
     lastCcAnalysis: null,
     lastLemnaAnalysis: null,
+    views: {
+      od: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
+      cc: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
+      lemna: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
+    },
   };
+
+  function resetViewSelections() {
+    state.views.od.selectedConcs.clear();
+    state.views.cc.selectedConcs.clear();
+    state.views.lemna.selectedConcs.clear();
+  }
+
+  function renderConcChips(containerId, concs, controlConc, unit, view) {
+    const el = $(containerId);
+    if (!el) return;
+    if (!concs || concs.length === 0) {
+      el.innerHTML = `<span class="form-hint">No concentrations yet</span>`;
+      return;
+    }
+    // Prune any selected concentrations no longer present
+    for (const c of Array.from(view.selectedConcs)) {
+      if (!concs.includes(c)) view.selectedConcs.delete(c);
+    }
+    const hasSel = view.selectedConcs.size > 0;
+    const chipsHtml = concs
+      .map((c) => {
+        const color = C.getConcColor(c, concs);
+        const isSel = view.selectedConcs.has(c);
+        const isCtrl = Number(c) === Number(controlConc);
+        const cls = [
+          "conc-chip",
+          isSel ? "active" : hasSel ? "dimmed" : "",
+          isCtrl ? "is-ctrl" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<button type="button" class="${cls}" style="--chip-color:${color}" data-chip-conc="${c}" title="Click to ${view.filterMode === "isolate" ? "isolate" : "highlight"} ${c} ${escapeHtml(unit)} across all graphs">
+          <span class="conc-chip-dot" style="background:${color}"></span>
+          <span>${c}${isCtrl ? ' <span class="ctrl-star" title="Control">★</span>' : ""}</span>
+        </button>`;
+      })
+      .join("");
+    const resetBtn = hasSel
+      ? `<button type="button" class="conc-chip conc-chip-reset" data-chip-reset="1" title="Show all concentrations normally">Reset</button>`
+      : "";
+    el.innerHTML = chipsHtml + resetBtn;
+  }
+
+  function toggleConcSelection(tabKey, concVal, renderFn) {
+    const view = state.views[tabKey];
+    const num = Number(concVal);
+    if (!Number.isFinite(num)) return;
+    if (view.selectedConcs.has(num)) view.selectedConcs.delete(num);
+    else view.selectedConcs.add(num);
+    renderFn();
+  }
 
   // ---------- Helpers ----------
   function $(id) {
@@ -94,8 +150,9 @@
     return "";
   }
 
-  function formatIc50Card(ic50, unit) {
-    if (!ic50) return { main: "—", sub: "50% inhibition threshold" };
+  function formatIc50Card(ic50, unit, targetPct = 50) {
+    const t = ic50?.targetPct ?? targetPct ?? 50;
+    if (!ic50) return { main: "—", sub: `${t}% inhibition threshold` };
     if (ic50.status === "interpolated" && Number.isFinite(ic50.value)) {
       return {
         main: `${ic50.value.toFixed(3)} ${unit}`,
@@ -105,7 +162,7 @@
     if (ic50.status === "below_50") {
       return {
         main: "> max",
-        sub: `Max inh. ${ic50.maxInhibition.toFixed(1)}% (< 50%)`,
+        sub: `Max inh. ${ic50.maxInhibition.toFixed(1)}% (< ${t}%)`,
       };
     }
     return { main: "N/A", sub: "Non-monotonic curve" };
@@ -135,6 +192,7 @@
 
     $("btn-edit-exp").disabled = !hasExp;
     $("btn-save-exp").disabled = !hasExp;
+    $("btn-export-html").disabled = !hasExp;
     $("btn-export-json").disabled = state.workspace.experiments.length === 0;
     sel.disabled = !hasExp;
 
@@ -304,8 +362,8 @@
       const rowsHtml = analysis.summary
         .map(
           (r) => `
-          <tr>
-            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " (Ctrl)" : ""}</td>
+          <tr data-conc-row="${r.concentration}" class="${state.views.od.selectedConcs.has(r.concentration) ? "row-highlighted" : ""}" title="Click to highlight in graphs">
+            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " ★ Ctrl" : ""}</td>
             <td>${M.formatNum(r.mu, 5)}</td>
             <td>${r.r2 !== null ? M.formatNum(r.r2, 4) : "—"}</td>
             <td>${r.doublingTime !== null ? `${M.formatNum(r.doublingTime, 1)} h` : "—"}</td>
@@ -407,13 +465,17 @@
     const tEnd = $("od-t-end").value;
     const unit = exp.meta.concUnit || "";
 
+    const view = state.views.od;
     const wlRecords = exp.odEntries.filter((e) => Number(e.wavelength) === activeWl);
     const analysis = M.analyzeTimeSeries(wlRecords, {
       controlConc,
       tStartHours: tStart,
       tEndHours: tEnd,
+      icTarget: view.icTarget,
     });
     state.lastOdAnalysis = analysis;
+
+    renderConcChips("od-conc-chips", analysis.concentrations, controlConc, unit, view);
 
     const ctrlRow = analysis.summary.find((r) => r.isControl);
     $("od-kpi-ctrl-mu").textContent = ctrlRow && ctrlRow.mu !== null ? M.formatNum(ctrlRow.mu, 4) : "—";
@@ -430,7 +492,8 @@
       $("od-kpi-max-inh-conc").textContent = "Highest observed";
     }
 
-    const ic50Disp = formatIc50Card(analysis.ic50, unit);
+    $("od-kpi-ic50-label").textContent = `Est. IC${view.icTarget} (Linear)`;
+    const ic50Disp = formatIc50Card(analysis.ic50, unit, view.icTarget);
     $("od-kpi-ic50").textContent = ic50Disp.main;
     $("od-kpi-ic50-sub").textContent = ic50Disp.sub;
 
@@ -452,6 +515,17 @@
         semiLogYLabel: "ln(OD)",
         filePrefix: `${slugify(exp.name)}_od${activeWl}`,
         singleTimepointBarTitle: `OD${activeWl} Snapshot (Mean ± SD)`,
+        viewOptions: {
+          highlightedConcs: view.selectedConcs,
+          filterMode: view.filterMode,
+          controlConc,
+          showErrorBars: view.showErrorBars,
+          showFitLines: view.showFitLines,
+          logX: view.logX,
+          icTarget: view.icTarget,
+          tStartHours: tStart,
+          tEndHours: tEnd,
+        },
       });
     }
 
@@ -649,8 +723,8 @@
       const rowsHtml = analysis.summary
         .map(
           (r) => `
-          <tr>
-            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " (Ctrl)" : ""}</td>
+          <tr data-conc-row="${r.concentration}" class="${state.views.cc.selectedConcs.has(r.concentration) ? "row-highlighted" : ""}" title="Click to highlight in graphs">
+            <td>${r.concentration} ${escapeHtml(unit)}${r.isControl ? " ★ Ctrl" : ""}</td>
             <td>${M.formatNum(r.mu, 5)}</td>
             <td>${r.r2 !== null ? M.formatNum(r.r2, 4) : "—"}</td>
             <td>${r.doublingTime !== null ? `${M.formatNum(r.doublingTime, 1)} h` : "—"}</td>
@@ -757,12 +831,16 @@
       value: e.cellsPerMl,
     }));
 
+    const view = state.views.cc;
     const analysis = M.analyzeTimeSeries(tsRecords, {
       controlConc,
       tStartHours: tStart,
       tEndHours: tEnd,
+      icTarget: view.icTarget,
     });
     state.lastCcAnalysis = analysis;
+
+    renderConcChips("cc-conc-chips", analysis.concentrations, controlConc, unit, view);
 
     const ctrlAvgRows = analysis.averaged.filter((r) => r.concentration === controlConc);
     const latestCtrl = ctrlAvgRows.length > 0 ? ctrlAvgRows[ctrlAvgRows.length - 1] : null;
@@ -773,7 +851,8 @@
     $("cc-kpi-ctrl-r2").textContent =
       ctrlSummary && ctrlSummary.r2 !== null ? `R² = ${ctrlSummary.r2.toFixed(4)}` : "Requires ≥ 2 timepoints";
 
-    const ic50Disp = formatIc50Card(analysis.ic50, unit);
+    $("cc-kpi-ic50-label").textContent = `Est. IC${view.icTarget} (Linear)`;
+    const ic50Disp = formatIc50Card(analysis.ic50, unit, view.icTarget);
     $("cc-kpi-ic50").textContent = ic50Disp.main;
     $("cc-kpi-ic50-sub").textContent = ic50Disp.sub;
 
@@ -795,6 +874,17 @@
         semiLogYLabel: "ln(Cells/mL)",
         filePrefix: `${slugify(exp.name)}_cellcount`,
         singleTimepointBarTitle: "Measured Cell Density (cells/mL ± SD)",
+        viewOptions: {
+          highlightedConcs: view.selectedConcs,
+          filterMode: view.filterMode,
+          controlConc,
+          showErrorBars: view.showErrorBars,
+          showFitLines: view.showFitLines,
+          logX: view.logX,
+          icTarget: view.icTarget,
+          tStartHours: tStart,
+          tEndHours: tEnd,
+        },
       });
     }
 
@@ -845,9 +935,12 @@
         .join("");
     }
 
+    const view = state.views.lemna;
     const controlConc = Number(state.lemnaControlConc ?? defaultCtrl);
-    const analysis = M.analyzeLemna(exp.lemnaEntries, controlConc);
+    const analysis = M.analyzeLemna(exp.lemnaEntries, controlConc, view.icTarget);
     state.lastLemnaAnalysis = analysis;
+
+    renderConcChips("lemna-conc-chips", concs, controlConc, unit, view);
 
     const editId = $("lemna-edit-id").value;
     $("lemna-list-count").textContent = analysis.rows.length;
@@ -894,13 +987,21 @@
       $("lemna-kpi-max-inh-conc").textContent = "Highest observed";
     }
 
-    const ic50Disp = formatIc50Card(analysis.ic50, unit);
+    $("lemna-kpi-ic50-label").textContent = `Est. IC${view.icTarget} (Linear)`;
+    const ic50Disp = formatIc50Card(analysis.ic50, unit, view.icTarget);
     $("lemna-kpi-ic50").textContent = ic50Disp.main;
     $("lemna-kpi-ic50-sub").textContent = ic50Disp.sub;
     $("lemna-kpi-count").textContent = analysis.rows.length;
 
     if (state.activeTab === "lemna") {
-      C.renderLemnaCharts(analysis, unit);
+      C.renderLemnaCharts(analysis, unit, {
+        highlightedConcs: view.selectedConcs,
+        filterMode: view.filterMode,
+        controlConc,
+        showErrorBars: view.showErrorBars,
+        logX: view.logX,
+        icTarget: view.icTarget,
+      });
     }
 
     const tbl = $("lemna-table-container");
@@ -910,8 +1011,8 @@
       const body = analysis.rows
         .map(
           (r) => `
-          <tr>
-            <td>${r.dilution} ${escapeHtml(unit)}${r.isControl ? " (Ctrl)" : ""}</td>
+          <tr data-conc-row="${r.dilution}" class="${view.selectedConcs.has(r.dilution) ? "row-highlighted" : ""}" title="Click to highlight in graphs">
+            <td>${r.dilution} ${escapeHtml(unit)}${r.isControl ? " ★ Ctrl" : ""}</td>
             <td>${r.tHours}</td>
             <td>${r.n0A} / ${r.ntA}</td>
             <td>${r.n0B !== null ? `${r.n0B} / ${r.ntB}` : "—"}</td>
@@ -1053,7 +1154,79 @@
     renderDilutionsTab();
   }
 
+  let expandedChartCard = null;
+
+  function resizeChartCardPlot(card) {
+    if (!card) return;
+    const box = card.querySelector(".chart-box");
+    if (box && global.Plotly && box.data) {
+      requestAnimationFrame(() => {
+        try {
+          global.Plotly.Plots.resize(box);
+        } catch {
+          // ignore if chart empty
+        }
+      });
+    }
+  }
+
+  function collapseExpandedChart() {
+    if (!expandedChartCard) return;
+    const card = expandedChartCard;
+    expandedChartCard = null;
+    card.classList.remove("is-expanded");
+    const btn = card.querySelector(".chart-expand-btn");
+    if (btn) {
+      btn.textContent = "⤢ Fullsize";
+      btn.setAttribute("aria-expanded", "false");
+      btn.title = "Expand graph to fullsize";
+    }
+    $("chart-fullscreen-backdrop").classList.remove("open");
+    document.body.style.overflow = "";
+    resizeChartCardPlot(card);
+  }
+
+  function toggleChartFullsize(card) {
+    if (!card) return;
+    if (expandedChartCard === card) {
+      collapseExpandedChart();
+      return;
+    }
+    if (expandedChartCard) {
+      collapseExpandedChart();
+    }
+    expandedChartCard = card;
+    card.classList.add("is-expanded");
+    const btn = card.querySelector(".chart-expand-btn");
+    if (btn) {
+      btn.textContent = "✕ Close";
+      btn.setAttribute("aria-expanded", "true");
+      btn.title = "Exit fullsize (Esc)";
+    }
+    $("chart-fullscreen-backdrop").classList.add("open");
+    document.body.style.overflow = "hidden";
+    resizeChartCardPlot(card);
+  }
+
+  function initChartFullsizeButtons() {
+    document.querySelectorAll(".chart-card").forEach((card) => {
+      if (card.querySelector(".chart-card-bar")) return;
+      const bar = document.createElement("div");
+      bar.className = "chart-card-bar";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-xs btn-ghost chart-expand-btn";
+      btn.textContent = "⤢ Fullsize";
+      btn.title = "Expand graph to fullsize";
+      btn.setAttribute("aria-expanded", "false");
+      btn.addEventListener("click", () => toggleChartFullsize(card));
+      bar.appendChild(btn);
+      card.insertBefore(bar, card.firstChild);
+    });
+  }
+
   function switchTab(tabName) {
+    collapseExpandedChart();
     state.activeTab = tabName;
     if (!getActiveExp()) return;
 
@@ -1227,6 +1400,7 @@
       state.odControlConc = null;
       state.ccControlConc = null;
       state.lemnaControlConc = null;
+      resetViewSelections();
       resetOdForm(false);
       resetCcForm(false);
       resetLemnaForm();
@@ -1255,6 +1429,33 @@
       const filename = `${slugify(exp.name)}.json`;
       S.downloadFile(filename, S.serializeExperimentSave(exp), "application/json");
       toast(`Saved "${filename}"`);
+    });
+
+    $("btn-export-html").addEventListener("click", async () => {
+      const exp = getActiveExp();
+      if (!exp) return;
+      const btn = $("btn-export-html");
+      const prevText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Exporting...";
+      try {
+        const filename = await Ecotox.Exporter.exportExperimentHTML(exp, {
+          odControlConc: state.odControlConc,
+          ccControlConc: state.ccControlConc,
+          lemnaControlConc: state.lemnaControlConc,
+          odTStart: $("od-t-start").value,
+          odTEnd: $("od-t-end").value,
+          ccTStart: $("cc-t-start").value,
+          ccTEnd: $("cc-t-end").value,
+        });
+        toast(`Exported "${filename}"`);
+      } catch (err) {
+        console.error("HTML export failed:", err);
+        alert(`HTML export failed: ${err.message}`);
+      } finally {
+        btn.disabled = !getActiveExp();
+        btn.textContent = prevText;
+      }
     });
 
     $("btn-export-json").addEventListener("click", () => {
@@ -1308,6 +1509,7 @@
         state.odControlConc = created.meta.controlConc;
         state.ccControlConc = created.meta.controlConc;
         state.lemnaControlConc = created.meta.controlConc;
+        resetViewSelections();
         resetOdForm(false);
         resetCcForm(false);
         resetLemnaForm();
@@ -1375,8 +1577,13 @@
         if (ev.target === backdrop) backdrop.classList.remove("open");
       });
     });
+    $("chart-fullscreen-backdrop").addEventListener("click", collapseExpandedChart);
+    window.addEventListener("resize", () => {
+      if (expandedChartCard) resizeChartCardPlot(expandedChartCard);
+    });
     window.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") {
+        if (expandedChartCard) collapseExpandedChart();
         document.querySelectorAll(".modal-backdrop.open").forEach((m) => m.classList.remove("open"));
       }
     });
@@ -1474,6 +1681,84 @@
     });
     $("od-t-start").addEventListener("input", () => renderOdTab());
     $("od-t-end").addEventListener("input", () => renderOdTab());
+
+    function bindManipDeck(prefix, tabKey, renderFn) {
+      const view = state.views[tabKey];
+      const chipsEl = $(`${prefix}-conc-chips`);
+      if (chipsEl) {
+        chipsEl.addEventListener("click", (ev) => {
+          const resetBtn = ev.target.closest("[data-chip-reset]");
+          if (resetBtn) {
+            view.selectedConcs.clear();
+            renderFn();
+            return;
+          }
+          const chip = ev.target.closest("[data-chip-conc]");
+          if (chip) toggleConcSelection(tabKey, chip.dataset.chipConc, renderFn);
+        });
+      }
+
+      const modeEl = $(`${prefix}-filter-mode`);
+      if (modeEl) {
+        modeEl.addEventListener("click", (ev) => {
+          const btn = ev.target.closest("button[data-mode]");
+          if (!btn) return;
+          view.filterMode = btn.dataset.mode;
+          modeEl.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+          renderFn();
+        });
+      }
+
+      const sdBtn = $(`${prefix}-toggle-sd`);
+      if (sdBtn) {
+        sdBtn.addEventListener("click", () => {
+          view.showErrorBars = !view.showErrorBars;
+          sdBtn.classList.toggle("active", view.showErrorBars);
+          sdBtn.setAttribute("aria-pressed", String(view.showErrorBars));
+          renderFn();
+        });
+      }
+
+      const fitBtn = $(`${prefix}-toggle-fit`);
+      if (fitBtn) {
+        fitBtn.addEventListener("click", () => {
+          view.showFitLines = !view.showFitLines;
+          fitBtn.classList.toggle("active", view.showFitLines);
+          fitBtn.setAttribute("aria-pressed", String(view.showFitLines));
+          renderFn();
+        });
+      }
+
+      const logBtn = $(`${prefix}-toggle-logx`);
+      if (logBtn) {
+        logBtn.addEventListener("click", () => {
+          view.logX = !view.logX;
+          logBtn.classList.toggle("active", view.logX);
+          logBtn.setAttribute("aria-pressed", String(view.logX));
+          renderFn();
+        });
+      }
+
+      const icSel = $(`${prefix}-ic-target`);
+      if (icSel) {
+        icSel.addEventListener("change", (ev) => {
+          view.icTarget = Number(ev.target.value) || 50;
+          renderFn();
+        });
+      }
+
+      const tableEl = $(`${prefix}-table-container`);
+      if (tableEl) {
+        tableEl.addEventListener("click", (ev) => {
+          const tr = ev.target.closest("tr[data-conc-row]");
+          if (tr) toggleConcSelection(tabKey, tr.dataset.concRow, renderFn);
+        });
+      }
+    }
+
+    bindManipDeck("od", "od", renderOdTab);
+    bindManipDeck("cc", "cc", renderCellCountTab);
+    bindManipDeck("lemna", "lemna", renderLemnaTab);
 
     $("od-table-tabs").addEventListener("click", (ev) => {
       const btn = ev.target.closest(".subtab-btn");
@@ -1981,6 +2266,7 @@
     $("cc-date").value = todayIso();
     $("cc-time").value = nowTimeHm();
 
+    initChartFullsizeButtons();
     bindEvents();
     updateCellCountModeUI();
     renderAll();

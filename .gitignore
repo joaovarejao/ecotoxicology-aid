@@ -4,6 +4,8 @@ saves/
 
 # System & editor files
 skills/
+.agents/
+.gemini/
 .DS_Store
 Thumbs.db
 *.log

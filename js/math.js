@@ -181,9 +181,10 @@
   }
 
   /**
-   * Estimates IC50 via linear interpolation across adjacent sorted (concentration, inhibition) points.
+   * Estimates ICx (e.g. IC10, IC20, IC50) via linear interpolation across sorted (concentration, inhibition) points.
    */
-  function estimateIC50(summaryRows) {
+  function estimateICx(summaryRows, targetPct = 50) {
+    const target = Number.isFinite(Number(targetPct)) ? Number(targetPct) : 50;
     if (!summaryRows || summaryRows.length < 2) return null;
     const valid = summaryRows
       .filter((r) => Number.isFinite(r.concentration) && Number.isFinite(r.inhibition))
@@ -191,15 +192,15 @@
 
     if (valid.length < 2) return null;
 
-    // Look for first crossing from < 50% to >= 50%
     for (let i = 0; i < valid.length - 1; i++) {
       const a = valid[i];
       const b = valid[i + 1];
-      if (a.inhibition < 50 && b.inhibition >= 50 && b.inhibition !== a.inhibition) {
-        const frac = (50 - a.inhibition) / (b.inhibition - a.inhibition);
-        const ic50 = a.concentration + frac * (b.concentration - a.concentration);
+      if (a.inhibition < target && b.inhibition >= target && b.inhibition !== a.inhibition) {
+        const frac = (target - a.inhibition) / (b.inhibition - a.inhibition);
+        const val = a.concentration + frac * (b.concentration - a.concentration);
         return {
-          value: ic50,
+          value: val,
+          targetPct: target,
           bracket: [a.concentration, b.concentration],
           status: "interpolated",
         };
@@ -207,10 +208,14 @@
     }
 
     const maxInh = Math.max(...valid.map((r) => r.inhibition));
-    if (maxInh < 50) {
-      return { value: null, status: "below_50", maxInhibition: maxInh };
+    if (maxInh < target) {
+      return { value: null, targetPct: target, status: "below_50", maxInhibition: maxInh };
     }
-    return { value: null, status: "not_monotonic", maxInhibition: maxInh };
+    return { value: null, targetPct: target, status: "not_monotonic", maxInhibition: maxInh };
+  }
+
+  function estimateIC50(summaryRows) {
+    return estimateICx(summaryRows, 50);
   }
 
   /**
@@ -315,6 +320,7 @@
     // 2. Calculate Overall Mu per concentration (using optional tStartHours/tEndHours window)
     const muByConc = new Map();
     const r2ByConc = new Map();
+    const fitLineByConc = new Map();
     const pointsUsedByConc = new Map();
 
     for (const conc of concentrations) {
@@ -339,13 +345,23 @@
         if (reg) {
           muByConc.set(conc, reg.slope);
           r2ByConc.set(conc, reg.r2);
+          const xStart = pts[0].elapsedHours;
+          const xEnd = pts[pts.length - 1].elapsedHours;
+          fitLineByConc.set(conc, {
+            x0: xStart,
+            y0: reg.intercept,
+            x1: xEnd,
+            y1: reg.slope * (xEnd - xStart) + reg.intercept,
+          });
         } else {
           muByConc.set(conc, null);
           r2ByConc.set(conc, null);
+          fitLineByConc.set(conc, null);
         }
       } else {
         muByConc.set(conc, null);
         r2ByConc.set(conc, null);
+        fitLineByConc.set(conc, null);
       }
     }
 
@@ -366,6 +382,7 @@
         isControl: conc === controlConc,
         mu,
         r2,
+        fitLine: fitLineByConc.get(conc) || null,
         doublingTime: mu !== null && mu > 0 ? Math.log(2) / mu : null,
         inhibition,
         pointsCount: pointsUsedByConc.get(conc) || 0,
@@ -423,7 +440,8 @@
       })
       .sort((a, b) => a.timestamp - b.timestamp || a.concentration - b.concentration);
 
-    const ic50 = estimateIC50(summary);
+    const icTarget = Number.isFinite(Number(options.icTarget)) ? Number(options.icTarget) : 50;
+    const ic50 = estimateICx(summary, icTarget);
 
     return {
       averaged,
@@ -433,6 +451,7 @@
       timepointsCount: uniqueTimestamps.length,
       t0Ms,
       ic50,
+      icTarget,
       controlMu,
     };
   }
@@ -440,7 +459,7 @@
   /**
    * Lemna minor Frond Assay analysis matching LemnaSample in calculations.ipynb.
    */
-  function analyzeLemna(entries, controlConc = 0) {
+  function analyzeLemna(entries, controlConc = 0, icTarget = 50) {
     if (!entries || entries.length === 0) {
       return { rows: [], controlMu: null, ic50: null };
     }
@@ -502,8 +521,8 @@
       return { ...r, inhibition };
     });
 
-    const ic50 = estimateIC50(rows);
-    return { rows, controlMu, ic50 };
+    const ic50 = estimateICx(rows, icTarget);
+    return { rows, controlMu, ic50, icTarget };
   }
 
   /**
@@ -532,6 +551,7 @@
     linearRegression,
     calculateCellCount,
     calculateInoculation,
+    estimateICx,
     estimateIC50,
     analyzeTimeSeries,
     analyzeLemna,
