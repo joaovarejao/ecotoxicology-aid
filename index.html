@@ -124,13 +124,20 @@
               <button type="submit" id="od-submit-btn" class="btn btn-primary">Add Measurement</button>
               <button type="button" id="od-cancel-edit" class="btn" hidden>Cancel</button>
             </div>
+            <details class="inline-danger-disclosure" id="od-delete-wrap" hidden>
+              <summary>Remove this measurement...</summary>
+              <div class="inline-danger-body">
+                <span>Permanently delete this OD entry?</span>
+                <button type="button" id="od-delete-btn" class="btn btn-xs btn-danger">Delete Entry</button>
+              </div>
+            </details>
           </form>
         </section>
 
         <section class="entries-section">
           <div class="section-header">
             <h3 class="section-title">Recorded OD Entries (<span id="od-list-count">0</span>)</h3>
-            <button type="button" id="btn-od-clear" class="btn btn-xs btn-danger">Clear All</button>
+            <span class="form-hint">Click Edit to modify</span>
           </div>
           <div class="entries-toolbar">
             <input type="text" id="od-filter-search" class="input" placeholder="Filter date, conc, well..." />
@@ -312,13 +319,20 @@
               <button type="submit" id="cc-submit-btn" class="btn btn-primary">Add Cell Count</button>
               <button type="button" id="cc-cancel-edit" class="btn" hidden>Cancel</button>
             </div>
+            <details class="inline-danger-disclosure" id="cc-delete-wrap" hidden>
+              <summary>Remove this cell count...</summary>
+              <div class="inline-danger-body">
+                <span>Permanently delete this cell count?</span>
+                <button type="button" id="cc-delete-btn" class="btn btn-xs btn-danger">Delete Entry</button>
+              </div>
+            </details>
           </form>
         </section>
 
         <section class="entries-section">
           <div class="section-header">
             <h3 class="section-title">Recorded Cell Counts (<span id="cc-list-count">0</span>)</h3>
-            <button type="button" id="btn-cc-clear" class="btn btn-xs btn-danger">Clear All</button>
+            <span class="form-hint">Click Edit to modify</span>
           </div>
           <div class="entries-toolbar">
             <input type="text" id="cc-filter-search" class="input" placeholder="Filter sample, conc, date..." />
@@ -489,13 +503,20 @@
               <button type="submit" id="lemna-submit-btn" class="btn btn-primary">Add Lemna Sample</button>
               <button type="button" id="lemna-cancel-edit" class="btn" hidden>Cancel</button>
             </div>
+            <details class="inline-danger-disclosure" id="lemna-delete-wrap" hidden>
+              <summary>Remove this Lemna sample...</summary>
+              <div class="inline-danger-body">
+                <span>Permanently delete this sample?</span>
+                <button type="button" id="lemna-delete-btn" class="btn btn-xs btn-danger">Delete Sample</button>
+              </div>
+            </details>
           </form>
         </section>
 
         <section class="entries-section">
           <div class="section-header">
             <h3 class="section-title">Lemna Samples (<span id="lemna-list-count">0</span>)</h3>
-            <button type="button" id="btn-lemna-clear" class="btn btn-xs btn-danger">Clear All</button>
+            <span class="form-hint">Click Edit to modify</span>
           </div>
           <div id="lemna-entries-list" class="entries-list"></div>
         </section>
@@ -584,10 +605,11 @@
       <aside class="panel-left">
         <section class="section-card">
           <div class="section-header">
-            <h2 class="section-title">Add Dilution Step</h2>
+            <h2 class="section-title" id="dil-form-title">Add Dilution Step</h2>
             <button type="button" id="btn-dil-daphnia" class="btn btn-xs" title="Load Daphnia 20 mL preset">Load Daphnia 20mL</button>
           </div>
           <form id="dil-form" autocomplete="off">
+            <input type="hidden" id="dil-edit-id" value="" />
             <div class="form-grid">
               <div class="form-field">
                 <label for="dil-conc">Target Conc. (<span class="unit-label">g/mL</span>)</label>
@@ -615,15 +637,23 @@
               </div>
             </div>
             <div class="form-actions">
-              <button type="submit" class="btn btn-primary">Add Dilution Row</button>
+              <button type="submit" id="dil-submit-btn" class="btn btn-primary">Add Dilution Row</button>
+              <button type="button" id="dil-cancel-edit" class="btn" hidden>Cancel</button>
             </div>
+            <details class="inline-danger-disclosure" id="dil-delete-wrap" hidden>
+              <summary>Remove this dilution step...</summary>
+              <div class="inline-danger-body">
+                <span>Permanently delete this step?</span>
+                <button type="button" id="dil-delete-btn" class="btn btn-xs btn-danger">Delete Step</button>
+              </div>
+            </details>
           </form>
         </section>
 
         <section class="entries-section">
           <div class="section-header">
             <h3 class="section-title">Verdünnungsreihe (<span id="dil-list-count">0</span>)</h3>
-            <button type="button" id="btn-dil-clear" class="btn btn-xs btn-danger">Clear All</button>
+            <span class="form-hint">Click Edit to modify</span>
           </div>
           <div id="dil-entries-list" class="entries-list"></div>
         </section>
@@ -690,11 +720,26 @@
               <input type="number" step="1" min="200" max="1000" id="exp-wl-input" class="input input-mono" value="680" required />
             </div>
           </div>
+
+          <details class="danger-zone" id="exp-danger-zone" hidden>
+            <summary>Danger Zone — Clear Tab Data or Delete Experiment</summary>
+            <div class="danger-zone-content">
+              <p class="danger-zone-note">Destructive actions require clicking twice to confirm.</p>
+              <div class="danger-zone-grid">
+                <button type="button" id="btn-od-clear" class="btn btn-xs btn-danger">Clear OD (0)</button>
+                <button type="button" id="btn-cc-clear" class="btn btn-xs btn-danger">Clear Cell Counts (0)</button>
+                <button type="button" id="btn-lemna-clear" class="btn btn-xs btn-danger">Clear Lemna (0)</button>
+                <button type="button" id="btn-dil-clear" class="btn btn-xs btn-danger">Clear Dilutions (0)</button>
+              </div>
+              <div class="danger-zone-sep">
+                <button type="button" id="btn-delete-exp" class="btn btn-sm btn-danger" style="width: 100%;">Delete Entire Experiment</button>
+              </div>
+            </div>
+          </details>
         </div>
         <div class="modal-footer" style="justify-content: space-between;">
           <div id="exp-edit-danger-actions" style="display: flex; gap: 6px;" hidden>
             <button type="button" id="btn-duplicate-exp" class="btn btn-sm">Duplicate</button>
-            <button type="button" id="btn-delete-exp" class="btn btn-sm btn-danger">Delete</button>
           </div>
           <div style="display: flex; gap: 8px; margin-left: auto;">
             <button type="button" class="btn" data-close-modal="exp-modal">Cancel</button>

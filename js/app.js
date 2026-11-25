@@ -130,17 +130,69 @@
     S.saveWorkspace(state.workspace);
   }
 
-  function toast(message) {
+  function toast(message, undoFn = null) {
     const stack = $("toast-stack");
     const el = document.createElement("div");
     el.className = "toast";
-    el.textContent = message;
-    stack.appendChild(el);
-    setTimeout(() => {
+    const msgSpan = document.createElement("span");
+    msgSpan.textContent = message;
+    el.appendChild(msgSpan);
+
+    let dismissed = false;
+    function dismiss() {
+      if (dismissed) return;
+      dismissed = true;
       el.style.opacity = "0";
       el.style.transition = "opacity 0.2s";
       setTimeout(() => el.remove(), 220);
-    }, 2600);
+    }
+
+    if (typeof undoFn === "function") {
+      const undoBtn = document.createElement("button");
+      undoBtn.type = "button";
+      undoBtn.className = "toast-undo-btn";
+      undoBtn.textContent = "Undo";
+      undoBtn.addEventListener("click", () => {
+        undoFn();
+        dismiss();
+      });
+      el.appendChild(undoBtn);
+    }
+
+    stack.appendChild(el);
+    setTimeout(dismiss, typeof undoFn === "function" ? 6000 : 2600);
+  }
+
+  const armTimers = new WeakMap();
+
+  function disarmButton(btn) {
+    if (!btn) return;
+    const t = armTimers.get(btn);
+    if (t) {
+      clearTimeout(t);
+      armTimers.delete(btn);
+    }
+    if (btn.dataset.origLabel) {
+      btn.textContent = btn.dataset.origLabel;
+      delete btn.dataset.origLabel;
+    }
+    btn.classList.remove("armed");
+    delete btn.dataset.armed;
+  }
+
+  function handleArmedClick(btn, confirmLabel, onConfirm) {
+    if (!btn || btn.disabled) return;
+    if (btn.dataset.armed === "1") {
+      disarmButton(btn);
+      onConfirm();
+      return;
+    }
+    btn.dataset.origLabel = btn.textContent;
+    btn.dataset.armed = "1";
+    btn.classList.add("armed");
+    btn.textContent = confirmLabel || "Confirm?";
+    const timer = setTimeout(() => disarmButton(btn), 4000);
+    armTimers.set(btn, timer);
   }
 
   function formatInhClass(val) {
@@ -340,8 +392,7 @@
               <div class="entry-sub">${escapeHtml(e.date)} ${escapeHtml(e.time)} · ${e.wavelength} nm</div>
             </div>
             <div class="entry-actions">
-              <button type="button" class="btn btn-xs btn-ghost" data-od-edit="${escapeHtml(e.id)}" title="Edit">Edit</button>
-              <button type="button" class="btn btn-xs btn-ghost" data-od-del="${escapeHtml(e.id)}" title="Delete">✕</button>
+              <button type="button" class="btn btn-xs btn-ghost" data-od-edit="${escapeHtml(e.id)}" title="Edit or remove measurement">Edit</button>
             </div>
           </div>
         `;
@@ -538,6 +589,9 @@
     $("od-form-title").textContent = "New OD Measurement";
     $("od-submit-btn").textContent = "Add Measurement";
     $("od-cancel-edit").hidden = true;
+    $("od-delete-wrap").hidden = true;
+    $("od-delete-wrap").open = false;
+    disarmButton($("od-delete-btn"));
     $("od-value").value = "";
     $("od-label").value = "";
     if (!keepSticky) {
@@ -701,8 +755,7 @@
               <div class="entry-sub">${escapeHtml(e.date)} ${escapeHtml(e.time)} · ${escapeHtml(detail)}</div>
             </div>
             <div class="entry-actions">
-              <button type="button" class="btn btn-xs btn-ghost" data-cc-edit="${escapeHtml(e.id)}">Edit</button>
-              <button type="button" class="btn btn-xs btn-ghost" data-cc-del="${escapeHtml(e.id)}">✕</button>
+              <button type="button" class="btn btn-xs btn-ghost" data-cc-edit="${escapeHtml(e.id)}" title="Edit or remove cell count">Edit</button>
             </div>
           </div>
         `;
@@ -896,6 +949,9 @@
     $("cc-form-title").textContent = "New Cell Count";
     $("cc-submit-btn").textContent = "Add Cell Count";
     $("cc-cancel-edit").hidden = true;
+    $("cc-delete-wrap").hidden = true;
+    $("cc-delete-wrap").open = false;
+    disarmButton($("cc-delete-btn"));
     $("cc-cells-expr").value = "";
     $("cc-direct-val").value = "";
     $("cc-sample-id").value = "";
@@ -963,8 +1019,7 @@
                 <div class="entry-sub">A: ${r.n0A}→${r.ntA}${repB} · t=${r.tHours}h</div>
               </div>
               <div class="entry-actions">
-                <button type="button" class="btn btn-xs btn-ghost" data-lemna-edit="${escapeHtml(r.id)}">Edit</button>
-                <button type="button" class="btn btn-xs btn-ghost" data-lemna-del="${escapeHtml(r.id)}">✕</button>
+                <button type="button" class="btn btn-xs btn-ghost" data-lemna-edit="${escapeHtml(r.id)}" title="Edit or remove sample">Edit</button>
               </div>
             </div>
           `;
@@ -1048,6 +1103,9 @@
     $("lemna-form-title").textContent = "New Lemna Sample";
     $("lemna-submit-btn").textContent = "Add Lemna Sample";
     $("lemna-cancel-edit").hidden = true;
+    $("lemna-delete-wrap").hidden = true;
+    $("lemna-delete-wrap").open = false;
+    disarmButton($("lemna-delete-btn"));
     $("lemna-conc").value = "";
     $("lemna-n0-a").value = "";
     $("lemna-nt-a").value = "";
@@ -1081,10 +1139,11 @@
     if (sorted.length === 0) {
       listEl.innerHTML = `<div class="empty-list">No dilution steps defined.<br/>Add rows above or load the Daphnia 20 mL preset.</div>`;
     } else {
+      const editId = $("dil-edit-id").value;
       listEl.innerHTML = sorted
         .map(
           (d) => `
-          <div class="entry-item">
+          <div class="entry-item ${d.id === editId ? "editing" : ""}">
             <div class="entry-main">
               <div class="entry-top">
                 <span class="entry-conc-tag">${d.concentration} ${escapeHtml(unit)}</span>
@@ -1093,7 +1152,7 @@
               <div class="entry-sub">${escapeHtml(d.mediumName || "Medium")} / ${escapeHtml(d.toxicantName || "Toxicant")} · Total ${(Number(d.mediumMl) + Number(d.toxicantMl)).toFixed(2)} mL</div>
             </div>
             <div class="entry-actions">
-              <button type="button" class="btn btn-xs btn-ghost" data-dil-del="${escapeHtml(d.id)}">✕</button>
+              <button type="button" class="btn btn-xs btn-ghost" data-dil-edit="${escapeHtml(d.id)}" title="Edit or remove step">Edit</button>
             </div>
           </div>`
         )
@@ -1139,6 +1198,19 @@
     if (state.activeTab === "dilutions") {
       C.renderDilutionChart(sorted, unit);
     }
+  }
+
+  function resetDilForm() {
+    $("dil-edit-id").value = "";
+    $("dil-form-title").textContent = "Add Dilution Step";
+    $("dil-submit-btn").textContent = "Add Dilution Row";
+    $("dil-cancel-edit").hidden = true;
+    $("dil-delete-wrap").hidden = true;
+    $("dil-delete-wrap").open = false;
+    disarmButton($("dil-delete-btn"));
+    $("dil-conc").value = "";
+    $("dil-tox-vol").value = "";
+    $("dil-med-vol").value = "";
   }
 
   // ==========================================================================
@@ -1291,6 +1363,7 @@
           resetOdForm(false);
           resetCcForm(false);
           resetLemnaForm();
+          resetDilForm();
           persist();
           renderAll();
           const active = getActiveExp();
@@ -1315,15 +1388,35 @@
     $(id).classList.remove("open");
   }
 
+  function refreshDangerZoneCounts(exp) {
+    if (!exp) return;
+    const setBtn = (id, label, count) => {
+      const btn = $(id);
+      if (!btn) return;
+      disarmButton(btn);
+      btn.textContent = `${label} (${count})`;
+      btn.disabled = count === 0;
+    };
+    setBtn("btn-od-clear", "Clear OD", exp.odEntries.length);
+    setBtn("btn-cc-clear", "Clear Cell Counts", exp.cellCountEntries.length);
+    setBtn("btn-lemna-clear", "Clear Lemna", exp.lemnaEntries.length);
+    setBtn("btn-dil-clear", "Clear Dilutions", exp.dilutions.length);
+  }
+
   function openExperimentModal(mode) {
     const exp = getActiveExp();
     if (mode === "edit" && !exp) return;
 
     $("exp-modal-mode").value = mode;
+    const dangerZone = $("exp-danger-zone");
+    dangerZone.open = false;
+    ["btn-od-clear", "btn-cc-clear", "btn-lemna-clear", "btn-dil-clear", "btn-delete-exp"].forEach((id) => disarmButton($(id)));
+
     if (mode === "create") {
       $("exp-modal-title").textContent = "Create New Experiment";
       $("exp-modal-submit").textContent = "Create Experiment";
       $("exp-edit-danger-actions").hidden = true;
+      dangerZone.hidden = true;
       $("exp-name-input").value = "";
       $("exp-pollutant-input").value = "";
       $("exp-organism-input").value = "Algae";
@@ -1334,12 +1427,14 @@
       $("exp-modal-title").textContent = "Experiment Settings";
       $("exp-modal-submit").textContent = "Save Changes";
       $("exp-edit-danger-actions").hidden = false;
+      dangerZone.hidden = false;
       $("exp-name-input").value = exp.name;
       $("exp-pollutant-input").value = exp.meta.pollutant || "";
       $("exp-organism-input").value = exp.meta.organism || "";
       $("exp-unit-input").value = exp.meta.concUnit || "mg/L";
       $("exp-control-input").value = exp.meta.controlConc ?? 0;
       $("exp-wl-input").value = exp.meta.defaultWavelength ?? 680;
+      refreshDangerZoneCounts(exp);
     }
     openModal("exp-modal");
     setTimeout(() => $("exp-name-input").focus(), 40);
@@ -1404,6 +1499,7 @@
       resetOdForm(false);
       resetCcForm(false);
       resetLemnaForm();
+      resetDilForm();
       persist();
       renderAll();
       toast(`Switched to "${getActiveExp().name}"`);
@@ -1513,6 +1609,7 @@
         resetOdForm(false);
         resetCcForm(false);
         resetLemnaForm();
+        resetDilForm();
         persist();
         renderAll();
         toast(`Created "${created.name}"`);
@@ -1553,19 +1650,25 @@
     $("btn-delete-exp").addEventListener("click", () => {
       const cur = getActiveExp();
       if (!cur) return;
-      if (!confirm(`Permanently delete experiment "${cur.name}" from local storage?`)) return;
-
-      state.workspace.experiments = state.workspace.experiments.filter((e) => e.id !== cur.id);
-      state.workspace.activeExperimentId =
-        state.workspace.experiments.length > 0 ? state.workspace.experiments[0].id : null;
-      state.odSelectedWavelength = null;
-      state.odControlConc = null;
-      state.ccControlConc = null;
-      state.lemnaControlConc = null;
-      persist();
-      renderAll();
-      closeModal("exp-modal");
-      toast("Experiment deleted");
+      handleArmedClick($("btn-delete-exp"), "Click again to permanently delete", () => {
+        if (!confirm(`Permanently delete experiment "${cur.name}" and all its measurements?`)) return;
+        state.workspace.experiments = state.workspace.experiments.filter((e) => e.id !== cur.id);
+        state.workspace.activeExperimentId =
+          state.workspace.experiments.length > 0 ? state.workspace.experiments[0].id : null;
+        state.odSelectedWavelength = null;
+        state.odControlConc = null;
+        state.ccControlConc = null;
+        state.lemnaControlConc = null;
+        resetViewSelections();
+        resetOdForm(false);
+        resetCcForm(false);
+        resetLemnaForm();
+        resetDilForm();
+        persist();
+        renderAll();
+        closeModal("exp-modal");
+        toast("Experiment deleted");
+      });
     });
 
     // Close modals via close buttons, backdrop, or Escape key
@@ -1628,45 +1731,68 @@
 
     $("od-entries-list").addEventListener("click", (ev) => {
       const editBtn = ev.target.closest("[data-od-edit]");
-      const delBtn = ev.target.closest("[data-od-del]");
       const exp = getActiveExp();
-      if (!exp) return;
+      if (!exp || !editBtn) return;
 
-      if (editBtn) {
-        const item = exp.odEntries.find((e) => e.id === editBtn.dataset.odEdit);
-        if (!item) return;
-        $("od-edit-id").value = item.id;
-        $("od-date").value = item.date;
-        $("od-time").value = item.time;
-        $("od-conc").value = item.concentration;
-        $("od-value").value = item.value;
-        $("od-wavelength").value = item.wavelength;
-        $("od-label").value = item.label || "";
-        $("od-form-title").textContent = "Edit OD Measurement";
-        $("od-submit-btn").textContent = "Update Measurement";
-        $("od-cancel-edit").hidden = false;
-        renderOdEntriesList(exp);
-      } else if (delBtn) {
-        const id = delBtn.dataset.odDel;
-        exp.odEntries = exp.odEntries.filter((e) => e.id !== id);
-        if ($("od-edit-id").value === id) resetOdForm(true);
+      const item = exp.odEntries.find((e) => e.id === editBtn.dataset.odEdit);
+      if (!item) return;
+      $("od-edit-id").value = item.id;
+      $("od-date").value = item.date;
+      $("od-time").value = item.time;
+      $("od-conc").value = item.concentration;
+      $("od-value").value = item.value;
+      $("od-wavelength").value = item.wavelength;
+      $("od-label").value = item.label || "";
+      $("od-form-title").textContent = "Edit OD Measurement";
+      $("od-submit-btn").textContent = "Update Measurement";
+      $("od-cancel-edit").hidden = false;
+      $("od-delete-wrap").hidden = false;
+      $("od-delete-wrap").open = false;
+      disarmButton($("od-delete-btn"));
+      renderOdEntriesList(exp);
+    });
+
+    $("od-delete-btn").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const id = $("od-edit-id").value;
+      if (!exp || !id) return;
+      handleArmedClick($("od-delete-btn"), "Confirm Delete", () => {
+        const idx = exp.odEntries.findIndex((e) => e.id === id);
+        if (idx < 0) return;
+        const removed = exp.odEntries[idx];
+        exp.odEntries.splice(idx, 1);
+        resetOdForm(true);
         persist();
         renderExperimentHeader();
         renderOdTab();
-        toast("OD entry deleted");
-      }
+        toast("OD entry deleted", () => {
+          exp.odEntries.splice(idx, 0, removed);
+          persist();
+          renderExperimentHeader();
+          renderOdTab();
+        });
+      });
     });
 
     $("btn-od-clear").addEventListener("click", () => {
       const exp = getActiveExp();
       if (!exp || exp.odEntries.length === 0) return;
-      if (!confirm(`Clear all ${exp.odEntries.length} OD entries in "${exp.name}"?`)) return;
-      exp.odEntries = [];
-      resetOdForm(true);
-      persist();
-      renderExperimentHeader();
-      renderOdTab();
-      toast("Cleared OD entries");
+      handleArmedClick($("btn-od-clear"), `Confirm Clear OD (${exp.odEntries.length})`, () => {
+        const snapshot = [...exp.odEntries];
+        exp.odEntries = [];
+        resetOdForm(true);
+        persist();
+        refreshDangerZoneCounts(exp);
+        renderExperimentHeader();
+        renderOdTab();
+        toast(`Cleared ${snapshot.length} OD entries`, () => {
+          exp.odEntries = snapshot;
+          persist();
+          refreshDangerZoneCounts(exp);
+          renderExperimentHeader();
+          renderOdTab();
+        });
+      });
     });
 
     $("od-filter-search").addEventListener("input", () => renderOdEntriesList(getActiveExp()));
@@ -1939,55 +2065,78 @@
 
     $("cc-entries-list").addEventListener("click", (ev) => {
       const editBtn = ev.target.closest("[data-cc-edit]");
-      const delBtn = ev.target.closest("[data-cc-del]");
       const exp = getActiveExp();
-      if (!exp) return;
+      if (!exp || !editBtn) return;
 
-      if (editBtn) {
-        const item = exp.cellCountEntries.find((e) => e.id === editBtn.dataset.ccEdit);
-        if (!item) return;
-        $("cc-edit-id").value = item.id;
-        $("cc-date").value = item.date;
-        $("cc-time").value = item.time;
-        $("cc-conc").value = item.concentration;
-        $("cc-sample-id").value = item.sampleId || "";
-        state.ccInputMode = item.inputMode === "direct" ? "direct" : "chamber";
-        updateCellCountModeUI();
-        if (state.ccInputMode === "chamber") {
-          $("cc-cells-expr").value = item.cellsCountedExpr || String(item.cellsCounted ?? "");
-          $("cc-squares").value = item.smallSquares || 64;
-          $("cc-dilution").value = item.dilutionFactor || 1;
-          $("cc-chamber-factor").value = String(item.chamberFactor || 4000000);
-          $("cc-volume-ul").value = item.volumeUl ?? 1000;
-        } else {
-          $("cc-direct-val").value = item.cellsPerMl;
-        }
-        $("cc-form-title").textContent = "Edit Cell Count";
-        $("cc-submit-btn").textContent = "Update Cell Count";
-        $("cc-cancel-edit").hidden = false;
-        updateCellCountPreview();
-        renderCcEntriesList(exp);
-      } else if (delBtn) {
-        const id = delBtn.dataset.ccDel;
-        exp.cellCountEntries = exp.cellCountEntries.filter((e) => e.id !== id);
-        if ($("cc-edit-id").value === id) resetCcForm(true);
+      const item = exp.cellCountEntries.find((e) => e.id === editBtn.dataset.ccEdit);
+      if (!item) return;
+      $("cc-edit-id").value = item.id;
+      $("cc-date").value = item.date;
+      $("cc-time").value = item.time;
+      $("cc-conc").value = item.concentration;
+      $("cc-sample-id").value = item.sampleId || "";
+      state.ccInputMode = item.inputMode === "direct" ? "direct" : "chamber";
+      updateCellCountModeUI();
+      if (state.ccInputMode === "chamber") {
+        $("cc-cells-expr").value = item.cellsCountedExpr || String(item.cellsCounted ?? "");
+        $("cc-squares").value = item.smallSquares || 64;
+        $("cc-dilution").value = item.dilutionFactor || 1;
+        $("cc-chamber-factor").value = String(item.chamberFactor || 4000000);
+        $("cc-volume-ul").value = item.volumeUl ?? 1000;
+      } else {
+        $("cc-direct-val").value = item.cellsPerMl;
+      }
+      $("cc-form-title").textContent = "Edit Cell Count";
+      $("cc-submit-btn").textContent = "Update Cell Count";
+      $("cc-cancel-edit").hidden = false;
+      $("cc-delete-wrap").hidden = false;
+      $("cc-delete-wrap").open = false;
+      disarmButton($("cc-delete-btn"));
+      updateCellCountPreview();
+      renderCcEntriesList(exp);
+    });
+
+    $("cc-delete-btn").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const id = $("cc-edit-id").value;
+      if (!exp || !id) return;
+      handleArmedClick($("cc-delete-btn"), "Confirm Delete", () => {
+        const idx = exp.cellCountEntries.findIndex((e) => e.id === id);
+        if (idx < 0) return;
+        const removed = exp.cellCountEntries[idx];
+        exp.cellCountEntries.splice(idx, 1);
+        resetCcForm(true);
         persist();
         renderExperimentHeader();
         renderCellCountTab();
-        toast("Cell count deleted");
-      }
+        toast("Cell count deleted", () => {
+          exp.cellCountEntries.splice(idx, 0, removed);
+          persist();
+          renderExperimentHeader();
+          renderCellCountTab();
+        });
+      });
     });
 
     $("btn-cc-clear").addEventListener("click", () => {
       const exp = getActiveExp();
       if (!exp || exp.cellCountEntries.length === 0) return;
-      if (!confirm(`Clear all ${exp.cellCountEntries.length} cell count entries?`)) return;
-      exp.cellCountEntries = [];
-      resetCcForm(true);
-      persist();
-      renderExperimentHeader();
-      renderCellCountTab();
-      toast("Cleared cell count entries");
+      handleArmedClick($("btn-cc-clear"), `Confirm Clear (${exp.cellCountEntries.length})`, () => {
+        const snapshot = [...exp.cellCountEntries];
+        exp.cellCountEntries = [];
+        resetCcForm(true);
+        persist();
+        refreshDangerZoneCounts(exp);
+        renderExperimentHeader();
+        renderCellCountTab();
+        toast(`Cleared ${snapshot.length} cell count entries`, () => {
+          exp.cellCountEntries = snapshot;
+          persist();
+          refreshDangerZoneCounts(exp);
+          renderExperimentHeader();
+          renderCellCountTab();
+        });
+      });
     });
 
     $("cc-filter-search").addEventListener("input", () => renderCcEntriesList(getActiveExp()));
@@ -2085,45 +2234,68 @@
 
     $("lemna-entries-list").addEventListener("click", (ev) => {
       const editBtn = ev.target.closest("[data-lemna-edit]");
-      const delBtn = ev.target.closest("[data-lemna-del]");
       const exp = getActiveExp();
-      if (!exp) return;
+      if (!exp || !editBtn) return;
 
-      if (editBtn) {
-        const item = exp.lemnaEntries.find((e) => e.id === editBtn.dataset.lemnaEdit);
-        if (!item) return;
-        $("lemna-edit-id").value = item.id;
-        $("lemna-conc").value = item.dilution;
-        $("lemna-hours").value = item.tHours;
-        $("lemna-n0-a").value = item.n0A;
-        $("lemna-nt-a").value = item.ntA;
-        $("lemna-n0-b").value = item.n0B ?? "";
-        $("lemna-nt-b").value = item.ntB ?? "";
-        $("lemna-form-title").textContent = "Edit Lemna Sample";
-        $("lemna-submit-btn").textContent = "Update Sample";
-        $("lemna-cancel-edit").hidden = false;
-        renderLemnaTab();
-      } else if (delBtn) {
-        const id = delBtn.dataset.lemnaDel;
-        exp.lemnaEntries = exp.lemnaEntries.filter((e) => e.id !== id);
-        if ($("lemna-edit-id").value === id) resetLemnaForm();
+      const item = exp.lemnaEntries.find((e) => e.id === editBtn.dataset.lemnaEdit);
+      if (!item) return;
+      $("lemna-edit-id").value = item.id;
+      $("lemna-conc").value = item.dilution;
+      $("lemna-hours").value = item.tHours;
+      $("lemna-n0-a").value = item.n0A;
+      $("lemna-nt-a").value = item.ntA;
+      $("lemna-n0-b").value = item.n0B ?? "";
+      $("lemna-nt-b").value = item.ntB ?? "";
+      $("lemna-form-title").textContent = "Edit Lemna Sample";
+      $("lemna-submit-btn").textContent = "Update Sample";
+      $("lemna-cancel-edit").hidden = false;
+      $("lemna-delete-wrap").hidden = false;
+      $("lemna-delete-wrap").open = false;
+      disarmButton($("lemna-delete-btn"));
+      renderLemnaTab();
+    });
+
+    $("lemna-delete-btn").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const id = $("lemna-edit-id").value;
+      if (!exp || !id) return;
+      handleArmedClick($("lemna-delete-btn"), "Confirm Delete", () => {
+        const idx = exp.lemnaEntries.findIndex((e) => e.id === id);
+        if (idx < 0) return;
+        const removed = exp.lemnaEntries[idx];
+        exp.lemnaEntries.splice(idx, 1);
+        resetLemnaForm();
         persist();
         renderExperimentHeader();
         renderLemnaTab();
-        toast("Lemna sample deleted");
-      }
+        toast("Lemna sample deleted", () => {
+          exp.lemnaEntries.splice(idx, 0, removed);
+          persist();
+          renderExperimentHeader();
+          renderLemnaTab();
+        });
+      });
     });
 
     $("btn-lemna-clear").addEventListener("click", () => {
       const exp = getActiveExp();
       if (!exp || exp.lemnaEntries.length === 0) return;
-      if (!confirm(`Clear all ${exp.lemnaEntries.length} Lemna samples?`)) return;
-      exp.lemnaEntries = [];
-      resetLemnaForm();
-      persist();
-      renderExperimentHeader();
-      renderLemnaTab();
-      toast("Cleared Lemna samples");
+      handleArmedClick($("btn-lemna-clear"), `Confirm Clear (${exp.lemnaEntries.length})`, () => {
+        const snapshot = [...exp.lemnaEntries];
+        exp.lemnaEntries = [];
+        resetLemnaForm();
+        persist();
+        refreshDangerZoneCounts(exp);
+        renderExperimentHeader();
+        renderLemnaTab();
+        toast(`Cleared ${snapshot.length} Lemna samples`, () => {
+          exp.lemnaEntries = snapshot;
+          persist();
+          refreshDangerZoneCounts(exp);
+          renderExperimentHeader();
+          renderLemnaTab();
+        });
+      });
     });
 
     $("lemna-ctrl-conc").addEventListener("change", (ev) => {
@@ -2161,27 +2333,38 @@
       ev.preventDefault();
       const exp = getActiveExp();
       if (!exp) return;
+      const editId = $("dil-edit-id").value;
       const conc = Number($("dil-conc").value);
       const total = Number($("dil-total").value);
       const tox = Number($("dil-tox-vol").value);
       const med = Math.max(0, total - tox);
       if (!Number.isFinite(conc) || !Number.isFinite(total) || !Number.isFinite(tox)) return;
 
-      exp.dilutions.push({
-        id: S.uid("dil"),
+      const entry = {
+        id: editId || S.uid("dil"),
         concentration: conc,
         mediumMl: med,
         toxicantMl: tox,
         mediumName: $("dil-med-name").value.trim() || "Medium",
         toxicantName: $("dil-tox-name").value.trim() || "Toxicant",
-      });
-      $("dil-conc").value = "";
-      $("dil-tox-vol").value = "";
-      $("dil-med-vol").value = "";
+      };
+      if (editId) {
+        const idx = exp.dilutions.findIndex((d) => d.id === editId);
+        if (idx >= 0) exp.dilutions[idx] = entry;
+        toast("Dilution step updated");
+      } else {
+        exp.dilutions.push(entry);
+        toast("Dilution step added");
+      }
+      resetDilForm();
       persist();
       renderExperimentHeader();
       renderDilutionsTab();
-      toast("Dilution step added");
+    });
+
+    $("dil-cancel-edit").addEventListener("click", () => {
+      resetDilForm();
+      renderDilutionsTab();
     });
 
     $("btn-dil-daphnia").addEventListener("click", () => {
@@ -2195,6 +2378,7 @@
         { id: S.uid("dil"), concentration: 1, mediumMl: 19.9, toxicantMl: 0.1, mediumName: "Tap water", toxicantName: "Insecticide" },
         { id: S.uid("dil"), concentration: 2, mediumMl: 19.8, toxicantMl: 0.2, mediumName: "Tap water", toxicantName: "Insecticide" },
       ];
+      resetDilForm();
       persist();
       renderExperimentHeader();
       renderDilutionsTab();
@@ -2202,23 +2386,68 @@
     });
 
     $("dil-entries-list").addEventListener("click", (ev) => {
-      const delBtn = ev.target.closest("[data-dil-del]");
+      const editBtn = ev.target.closest("[data-dil-edit]");
       const exp = getActiveExp();
-      if (!delBtn || !exp) return;
-      exp.dilutions = exp.dilutions.filter((d) => d.id !== delBtn.dataset.dilDel);
-      persist();
-      renderExperimentHeader();
+      if (!editBtn || !exp) return;
+      const item = exp.dilutions.find((d) => d.id === editBtn.dataset.dilEdit);
+      if (!item) return;
+      $("dil-edit-id").value = item.id;
+      $("dil-conc").value = item.concentration;
+      $("dil-total").value = Number((Number(item.mediumMl) + Number(item.toxicantMl)).toFixed(4));
+      $("dil-tox-vol").value = item.toxicantMl;
+      $("dil-med-vol").value = item.mediumMl;
+      $("dil-med-name").value = item.mediumName || "Medium";
+      $("dil-tox-name").value = item.toxicantName || "Toxicant";
+      $("dil-form-title").textContent = "Edit Dilution Step";
+      $("dil-submit-btn").textContent = "Update Dilution Row";
+      $("dil-cancel-edit").hidden = false;
+      $("dil-delete-wrap").hidden = false;
+      $("dil-delete-wrap").open = false;
+      disarmButton($("dil-delete-btn"));
       renderDilutionsTab();
+    });
+
+    $("dil-delete-btn").addEventListener("click", () => {
+      const exp = getActiveExp();
+      const id = $("dil-edit-id").value;
+      if (!exp || !id) return;
+      handleArmedClick($("dil-delete-btn"), "Confirm Delete", () => {
+        const idx = exp.dilutions.findIndex((d) => d.id === id);
+        if (idx < 0) return;
+        const removed = exp.dilutions[idx];
+        exp.dilutions.splice(idx, 1);
+        resetDilForm();
+        persist();
+        renderExperimentHeader();
+        renderDilutionsTab();
+        toast("Dilution step deleted", () => {
+          exp.dilutions.splice(idx, 0, removed);
+          persist();
+          renderExperimentHeader();
+          renderDilutionsTab();
+        });
+      });
     });
 
     $("btn-dil-clear").addEventListener("click", () => {
       const exp = getActiveExp();
       if (!exp || exp.dilutions.length === 0) return;
-      if (!confirm("Clear all dilution steps?")) return;
-      exp.dilutions = [];
-      persist();
-      renderExperimentHeader();
-      renderDilutionsTab();
+      handleArmedClick($("btn-dil-clear"), `Confirm Clear (${exp.dilutions.length})`, () => {
+        const snapshot = [...exp.dilutions];
+        exp.dilutions = [];
+        resetDilForm();
+        persist();
+        refreshDangerZoneCounts(exp);
+        renderExperimentHeader();
+        renderDilutionsTab();
+        toast(`Cleared ${snapshot.length} dilution steps`, () => {
+          exp.dilutions = snapshot;
+          persist();
+          refreshDangerZoneCounts(exp);
+          renderExperimentHeader();
+          renderDilutionsTab();
+        });
+      });
     });
 
     $("btn-dil-export-csv").addEventListener("click", () => {
