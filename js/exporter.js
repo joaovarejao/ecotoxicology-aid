@@ -163,11 +163,12 @@
     const sections = [];
 
     // ---------------- 1. OD ASSAY SECTION(S) ----------------
-    if (exp.odEntries && exp.odEntries.length > 0) {
-      const wavelengths = Array.from(new Set(exp.odEntries.map((e) => Number(e.wavelength)))).sort((a, b) => a - b);
+    const activeOd = (exp.odEntries || []).filter((e) => !e.ignored);
+    if (activeOd.length > 0) {
+      const wavelengths = Array.from(new Set(activeOd.map((e) => Number(e.wavelength)))).sort((a, b) => a - b);
 
       for (const wl of wavelengths) {
-        const wlRecords = exp.odEntries.filter((e) => Number(e.wavelength) === wl);
+        const wlRecords = activeOd.filter((e) => Number(e.wavelength) === wl);
         const analysis = M.analyzeTimeSeries(wlRecords, {
           controlConc: odCtrl,
           tStartHours: options.odTStart ?? null,
@@ -238,8 +239,9 @@
     }
 
     // ---------------- 2. CELL COUNT SECTION ----------------
-    if (exp.cellCountEntries && exp.cellCountEntries.length > 0) {
-      const tsRecords = exp.cellCountEntries.map((e) => ({
+    const activeCc = (exp.cellCountEntries || []).filter((e) => !e.ignored);
+    if (activeCc.length > 0) {
+      const tsRecords = activeCc.map((e) => ({
         date: e.date,
         time: e.time,
         concentration: e.concentration,
@@ -275,7 +277,7 @@
       const ctrlRow = analysis.summary.find((r) => r.isControl);
       const ic50 = formatIc50(analysis.ic50, unit);
 
-      const rawRows = [...exp.cellCountEntries]
+      const rawRows = [...activeCc]
         .sort((a, b) => M.parseTimestampMs(a.date, a.time) - M.parseTimestampMs(b.date, b.time))
         .map(
           (e) => `
@@ -297,7 +299,7 @@
             <div class="kpi"><div class="kpi-label">Latest Control Density</div><div class="kpi-val accent">${latestCtrl ? M.formatSci(latestCtrl.meanVal, 3) : "—"}</div><div class="kpi-sub">cells/mL (mean)</div></div>
             <div class="kpi"><div class="kpi-label">Control &mu; (h<sup>&minus;1</sup>)</div><div class="kpi-val">${ctrlRow && ctrlRow.mu !== null ? M.formatNum(ctrlRow.mu, 4) : "—"}</div><div class="kpi-sub">${ctrlRow && ctrlRow.r2 !== null ? `R&sup2; = ${ctrlRow.r2.toFixed(4)}` : "Need &ge; 2 timepoints"}</div></div>
             <div class="kpi"><div class="kpi-label">Est. IC50 (Linear)</div><div class="kpi-val danger">${escapeHtml(ic50.val)}</div><div class="kpi-sub">${escapeHtml(ic50.sub)}</div></div>
-            <div class="kpi"><div class="kpi-label">Counts Recorded</div><div class="kpi-val">${exp.cellCountEntries.length}</div><div class="kpi-sub">${analysis.timepointsCount} timepoints &middot; ${analysis.concentrations.length} conc.</div></div>
+            <div class="kpi"><div class="kpi-label">Counts Recorded</div><div class="kpi-val">${activeCc.length}</div><div class="kpi-sub">${analysis.timepointsCount} timepoints &middot; ${analysis.concentrations.length} conc.</div></div>
           </div>
           ${renderChartsGridHtml(chartImages)}
           ${analysis.timepointsCount >= 2 ? renderTimeSeriesTablesHtml(analysis, unit, true) : ""}
@@ -313,8 +315,9 @@
     }
 
     // ---------------- 3. LEMNA MINOR SECTION ----------------
-    if (exp.lemnaEntries && exp.lemnaEntries.length > 0) {
-      const analysis = M.analyzeLemna(exp.lemnaEntries, lemnaCtrl);
+    const activeLemna = (exp.lemnaEntries || []).filter((e) => !e.ignored);
+    if (activeLemna.length > 0) {
+      const analysis = M.analyzeLemna(activeLemna, lemnaCtrl);
       let chartImages = [];
       if (renderImages) {
         const specs = C.buildLemnaSpecs(analysis, unit, true);
@@ -367,8 +370,9 @@
     }
 
     // ---------------- 3B. DAPHNIA MAGNA & PROBIT SECTION ----------------
-    if (exp.daphniaEntries && exp.daphniaEntries.length > 0) {
-      const analysis = M.analyzeDaphnia(exp.daphniaEntries, { controlConc: defaultCtrl, timepoint: "48h", targetPct: 50 });
+    const activeDaphnia = (exp.daphniaEntries || []).filter((e) => !e.ignored);
+    if (activeDaphnia.length > 0) {
+      const analysis = M.analyzeDaphnia(activeDaphnia, { controlConc: defaultCtrl, timepoint: "48h", targetPct: 50 });
       let chartImages = [];
       if (renderImages && C.buildDaphniaSpecs) {
         const specs = C.buildDaphniaSpecs(analysis, unit, true);
@@ -415,8 +419,9 @@
     }
 
     // ---------------- 3C. VIBRIO FISCHERI SECTION ----------------
-    if (exp.vibrioEntries && exp.vibrioEntries.length > 0) {
-      const analysis = M.analyzeVibrio(exp.vibrioEntries, { controlConc: defaultCtrl });
+    const activeVibrio = (exp.vibrioEntries || []).filter((e) => !e.ignored);
+    if (activeVibrio.length > 0) {
+      const analysis = M.analyzeVibrio(activeVibrio, { controlConc: defaultCtrl });
       let chartImages = [];
       if (renderImages && C.buildVibrioSpecs) {
         const specs = C.buildVibrioSpecs(analysis, unit, true);
@@ -463,8 +468,9 @@
     }
 
     // ---------------- 4. DILUTION SERIES SECTION ----------------
-    if (exp.dilutions && exp.dilutions.length > 0) {
-      const sorted = [...exp.dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
+    const activeDilutions = (exp.dilutions || []).filter((d) => !d.ignored);
+    if (activeDilutions.length > 0) {
+      const sorted = [...activeDilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
       let chartImages = [];
       if (renderImages) {
         const spec = C.buildDilutionSpec(sorted, unit, true);

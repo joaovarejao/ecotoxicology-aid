@@ -111,6 +111,30 @@
       .replace(/'/g, "&#39;");
   }
 
+  function renderEntryToggleHtml(type, id, ignored) {
+    const checked = ignored ? "" : "checked";
+    const label = ignored
+      ? "Ignored — toggle on to include in calculations and graphs"
+      : "Included — toggle off to ignore in calculations and graphs";
+    return `<label class="entry-toggle" title="${label}">
+      <input type="checkbox" ${checked} data-ignore-type="${type}" data-ignore-id="${escapeHtml(id)}" aria-label="${label}" />
+      <span class="entry-toggle-track"></span>
+    </label>`;
+  }
+
+  function formatEntryBadge(arr) {
+    const list = Array.isArray(arr) ? arr : [];
+    const active = list.filter((e) => !e.ignored).length;
+    return active < list.length ? `${active}/${list.length}` : String(list.length);
+  }
+
+  function preserveIgnored(arr, editId, entry) {
+    if (!editId || !Array.isArray(arr)) return entry;
+    const existing = arr.find((e) => e.id === editId);
+    if (existing && existing.ignored) entry.ignored = true;
+    return entry;
+  }
+
   function todayIso() {
     const d = new Date();
     const y = d.getFullYear();
@@ -306,12 +330,12 @@
     $("exp-meta-pills").innerHTML = pills.join("");
 
     // Update tab count badges
-    $("badge-od").textContent = exp.odEntries.length;
-    $("badge-cellcount").textContent = exp.cellCountEntries.length;
-    $("badge-lemna").textContent = exp.lemnaEntries.length;
-    $("badge-daphnia").textContent = (exp.daphniaEntries || []).length;
-    $("badge-vibrio").textContent = (exp.vibrioEntries || []).length;
-    $("badge-dilutions").textContent = exp.dilutions.length;
+    $("badge-od").textContent = formatEntryBadge(exp.odEntries);
+    $("badge-cellcount").textContent = formatEntryBadge(exp.cellCountEntries);
+    $("badge-lemna").textContent = formatEntryBadge(exp.lemnaEntries);
+    $("badge-daphnia").textContent = formatEntryBadge(exp.daphniaEntries);
+    $("badge-vibrio").textContent = formatEntryBadge(exp.vibrioEntries);
+    $("badge-dilutions").textContent = formatEntryBadge(exp.dilutions);
   }
 
   // ==========================================================================
@@ -337,7 +361,7 @@
     }
 
     const activeWl = Number(state.odSelectedWavelength);
-    const wlEntries = exp.odEntries.filter((e) => Number(e.wavelength) === activeWl);
+    const wlEntries = exp.odEntries.filter((e) => !e.ignored && Number(e.wavelength) === activeWl);
     const concs = Array.from(new Set(wlEntries.map((e) => Number(e.concentration)))).sort((a, b) => a - b);
 
     const ctrlSel = $("od-ctrl-conc");
@@ -399,17 +423,20 @@
       .map((e) => {
         const isCtrl = Number(e.concentration) === ctrlConc;
         const isEditing = e.id === editId;
+        const isIgnored = Boolean(e.ignored);
         return `
-          <div class="entry-item ${isEditing ? "editing" : ""}">
+          <div class="entry-item ${isEditing ? "editing" : ""} ${isIgnored ? "ignored" : ""}">
             <div class="entry-main">
               <div class="entry-top">
                 <span class="entry-val">${M.formatNum(Number(e.value), 3)}</span>
                 <span class="entry-conc-tag ${isCtrl ? "control" : ""}">${e.concentration} ${escapeHtml(unit)}${isCtrl ? " · Ctrl" : ""}</span>
                 ${e.label ? `<span class="form-hint">${escapeHtml(e.label)}</span>` : ""}
+                ${isIgnored ? `<span class="entry-ignored-tag">Ignored</span>` : ""}
               </div>
               <div class="entry-sub">${escapeHtml(e.date)} ${escapeHtml(e.time)} · ${e.wavelength} nm</div>
             </div>
             <div class="entry-actions">
+              ${renderEntryToggleHtml("od", e.id, isIgnored)}
               <button type="button" class="btn btn-xs btn-ghost" data-od-edit="${escapeHtml(e.id)}" title="Edit or remove measurement">Edit</button>
             </div>
           </div>
@@ -535,7 +562,7 @@
     const unit = exp.meta.concUnit || "";
 
     const view = state.views.od;
-    const wlRecords = exp.odEntries.filter((e) => Number(e.wavelength) === activeWl);
+    const wlRecords = exp.odEntries.filter((e) => !e.ignored && Number(e.wavelength) === activeWl);
     const analysis = M.analyzeTimeSeries(wlRecords, {
       controlConc,
       tStartHours: tStart,
@@ -665,7 +692,9 @@
   }
 
   function populateCcControls(exp) {
-    const concs = Array.from(new Set(exp.cellCountEntries.map((e) => Number(e.concentration)))).sort((a, b) => a - b);
+    const activeCc = exp.cellCountEntries.filter((e) => !e.ignored);
+    const concs = Array.from(new Set(activeCc.map((e) => Number(e.concentration)))).sort((a, b) => a - b);
+    const allConcs = Array.from(new Set(exp.cellCountEntries.map((e) => Number(e.concentration)))).sort((a, b) => a - b);
     const ctrlSel = $("cc-ctrl-conc");
     const defaultCtrl = Number(exp.meta.controlConc);
     if (concs.length === 0) {
@@ -684,7 +713,7 @@
     const prevFilter = filterSel.value || "all";
     filterSel.innerHTML =
       `<option value="all">All conc.</option>` +
-      concs.map((c) => `<option value="${c}">${c} ${escapeHtml(exp.meta.concUnit)}</option>`).join("");
+      allConcs.map((c) => `<option value="${c}">${c} ${escapeHtml(exp.meta.concUnit)}</option>`).join("");
     if ([...filterSel.options].some((o) => o.value === prevFilter)) {
       filterSel.value = prevFilter;
     }
@@ -692,10 +721,10 @@
     const inocSel = $("inoc-source");
     const prevSource = inocSel.value || "custom";
     const opts = [`<option value="custom">Custom value</option>`];
-    if (exp.cellCountEntries.length > 0) {
-      const avgAll = M.mean(exp.cellCountEntries.map((e) => Number(e.cellsPerMl)).filter(Number.isFinite));
+    if (activeCc.length > 0) {
+      const avgAll = M.mean(activeCc.map((e) => Number(e.cellsPerMl)).filter(Number.isFinite));
       opts.push(`<option value="avg_all">Avg of all entries (${M.formatSci(avgAll, 3)})</option>`);
-      exp.cellCountEntries.forEach((e) => {
+      activeCc.forEach((e) => {
         const label = e.sampleId || `${e.concentration} ${exp.meta.concUnit}`;
         opts.push(`<option value="${escapeHtml(e.id)}">${escapeHtml(label)} · ${escapeHtml(e.date)} (${M.formatSci(e.cellsPerMl, 2)})</option>`);
       });
@@ -758,21 +787,24 @@
       .map((e) => {
         const isCtrl = Number(e.concentration) === ctrlConc;
         const isEditing = e.id === editId;
+        const isIgnored = Boolean(e.ignored);
         const detail =
           e.inputMode === "chamber"
             ? `${e.cellsCounted} cells / ${e.smallSquares} sq · DF ${e.dilutionFactor}`
             : `Direct input`;
         return `
-          <div class="entry-item ${isEditing ? "editing" : ""}">
+          <div class="entry-item ${isEditing ? "editing" : ""} ${isIgnored ? "ignored" : ""}">
             <div class="entry-main">
               <div class="entry-top">
                 <span class="entry-val">${M.formatSci(Number(e.cellsPerMl), 3)} /mL</span>
                 <span class="entry-conc-tag ${isCtrl ? "control" : ""}">${e.concentration} ${escapeHtml(unit)}${isCtrl ? " · Ctrl" : ""}</span>
                 ${e.sampleId ? `<span class="form-hint">${escapeHtml(e.sampleId)}</span>` : ""}
+                ${isIgnored ? `<span class="entry-ignored-tag">Ignored</span>` : ""}
               </div>
               <div class="entry-sub">${escapeHtml(e.date)} ${escapeHtml(e.time)} · ${escapeHtml(detail)}</div>
             </div>
             <div class="entry-actions">
+              ${renderEntryToggleHtml("cc", e.id, isIgnored)}
               <button type="button" class="btn btn-xs btn-ghost" data-cc-edit="${escapeHtml(e.id)}" title="Edit or remove cell count">Edit</button>
             </div>
           </div>
@@ -895,7 +927,8 @@
     const tEnd = $("cc-t-end").value;
     const unit = exp.meta.concUnit || "";
 
-    const tsRecords = exp.cellCountEntries.map((e) => ({
+    const activeCc = exp.cellCountEntries.filter((e) => !e.ignored);
+    const tsRecords = activeCc.map((e) => ({
       date: e.date,
       time: e.time,
       concentration: e.concentration,
@@ -927,7 +960,7 @@
     $("cc-kpi-ic50").textContent = ic50Disp.main;
     $("cc-kpi-ic50-sub").textContent = ic50Disp.sub;
 
-    $("cc-kpi-coverage").textContent = `${exp.cellCountEntries.length} counts`;
+    $("cc-kpi-coverage").textContent = `${activeCc.length} counts`;
     $("cc-kpi-coverage-sub").textContent = `${analysis.timepointsCount} timepoints · ${analysis.concentrations.length} conc.`;
 
     if (state.activeTab === "cellcount") {
@@ -993,7 +1026,8 @@
     if (!exp) return;
 
     const unit = exp.meta.concUnit || "";
-    const concs = Array.from(new Set(exp.lemnaEntries.map((e) => Number(e.dilution)))).sort((a, b) => a - b);
+    const activeLemna = exp.lemnaEntries.filter((e) => !e.ignored);
+    const concs = Array.from(new Set(activeLemna.map((e) => Number(e.dilution)))).sort((a, b) => a - b);
     const ctrlSel = $("lemna-ctrl-conc");
     const defaultCtrl = Number(exp.meta.controlConc);
 
@@ -1011,33 +1045,39 @@
 
     const view = state.views.lemna;
     const controlConc = Number(state.lemnaControlConc ?? defaultCtrl);
-    const analysis = M.analyzeLemna(exp.lemnaEntries, controlConc, view.icTarget);
+    const analysis = M.analyzeLemna(activeLemna, controlConc, view.icTarget);
     state.lastLemnaAnalysis = analysis;
 
     renderConcChips("lemna-conc-chips", concs, controlConc, unit, view);
 
     const editId = $("lemna-edit-id").value;
-    $("lemna-list-count").textContent = analysis.rows.length;
+    $("lemna-list-count").textContent = exp.lemnaEntries.length;
     const listEl = $("lemna-entries-list");
-    if (analysis.rows.length === 0) {
+    if (exp.lemnaEntries.length === 0) {
       listEl.innerHTML = `<div class="empty-list">No Lemna minor samples yet.<br/>Enter Day 0 and Final frond counts above.</div>`;
     } else {
-      listEl.innerHTML = analysis.rows
-        .map((r) => {
-          const isEditing = r.id === editId;
+      const rowById = new Map(analysis.rows.map((r) => [r.id, r]));
+      const allSorted = [...exp.lemnaEntries].sort((a, b) => Number(a.dilution) - Number(b.dilution));
+      listEl.innerHTML = allSorted
+        .map((e) => {
+          const r = rowById.get(e.id) || M.analyzeLemna([e], controlConc, view.icTarget).rows[0];
+          const isEditing = e.id === editId;
+          const isIgnored = Boolean(e.ignored);
           const repB = r.n0B !== null ? ` | B: ${r.n0B}→${r.ntB}` : "";
           return `
-            <div class="entry-item ${isEditing ? "editing" : ""}">
+            <div class="entry-item ${isEditing ? "editing" : ""} ${isIgnored ? "ignored" : ""}">
               <div class="entry-main">
                 <div class="entry-top">
                   <span class="entry-conc-tag ${r.isControl ? "control" : ""}">${r.dilution} ${escapeHtml(unit)}${r.isControl ? " · Ctrl" : ""}</span>
                   <span class="entry-val">μ=${M.formatNum(r.mu, 4)}</span>
-                  ${r.inhibition !== null ? `<span class="form-hint ${formatInhClass(r.inhibition)}">${r.inhibition.toFixed(1)}%</span>` : ""}
+                  ${!isIgnored && r.inhibition !== null ? `<span class="form-hint ${formatInhClass(r.inhibition)}">${r.inhibition.toFixed(1)}%</span>` : ""}
+                  ${isIgnored ? `<span class="entry-ignored-tag">Ignored</span>` : ""}
                 </div>
                 <div class="entry-sub">A: ${r.n0A}→${r.ntA}${repB} · t=${r.tHours}h${r.notes ? ` · ${escapeHtml(r.notes)}` : ""}</div>
               </div>
               <div class="entry-actions">
-                <button type="button" class="btn btn-xs btn-ghost" data-lemna-edit="${escapeHtml(r.id)}" title="Edit or remove sample">Edit</button>
+                ${renderEntryToggleHtml("lemna", e.id, isIgnored)}
+                <button type="button" class="btn btn-xs btn-ghost" data-lemna-edit="${escapeHtml(e.id)}" title="Edit or remove sample">Edit</button>
               </div>
             </div>
           `;
@@ -1152,7 +1192,8 @@
     const unit = exp.meta.concUnit || "mg/L";
     const view = state.views.daphnia;
 
-    const uniqueConcs = Array.from(new Set(exp.daphniaEntries.map((e) => Number(e.concentration)).filter(Number.isFinite))).sort((a, b) => a - b);
+    const activeDaphnia = exp.daphniaEntries.filter((e) => !e.ignored);
+    const uniqueConcs = Array.from(new Set(activeDaphnia.map((e) => Number(e.concentration)).filter(Number.isFinite))).sort((a, b) => a - b);
     const ctrlSel = $("daphnia-ctrl-conc");
     const defaultCtrl = Number(exp.meta.controlConc ?? 0);
     if (state.daphniaControlConc === null || !uniqueConcs.includes(state.daphniaControlConc)) {
@@ -1164,7 +1205,7 @@
         : `<option value="${defaultCtrl}">${defaultCtrl}</option>`;
 
     const controlConc = state.daphniaControlConc;
-    const analysis = M.analyzeDaphnia(exp.daphniaEntries, {
+    const analysis = M.analyzeDaphnia(activeDaphnia, {
       controlConc,
       timepoint: state.daphniaTimepoint,
       targetPct: view.targetPct,
@@ -1185,18 +1226,21 @@
       listEl.innerHTML = sortedEntries
         .map((e) => {
           const isCtrl = Number(e.concentration) === controlConc;
+          const isIgnored = Boolean(e.ignored);
           const p24 = e.immob24 !== null && e.immob24 !== "" && e.immob24 !== undefined ? `24h: ${e.immob24}/${e.totalAnimals}` : "24h: —";
           const p48 = e.immob48 !== null && e.immob48 !== "" && e.immob48 !== undefined ? `48h: ${e.immob48}/${e.totalAnimals}` : "48h: —";
           return `
-            <div class="entry-item ${e.id === editId ? "editing" : ""}">
+            <div class="entry-item ${e.id === editId ? "editing" : ""} ${isIgnored ? "ignored" : ""}">
               <div class="entry-main">
                 <div class="entry-top">
                   <span class="entry-conc-tag ${isCtrl ? "control" : ""}">${e.concentration} ${escapeHtml(unit)}${isCtrl ? " · Ctrl" : ""}</span>
                   <span class="entry-val">N=${e.totalAnimals}</span>
+                  ${isIgnored ? `<span class="entry-ignored-tag">Ignored</span>` : ""}
                 </div>
                 <div class="entry-sub">${p24} · ${p48}${e.notes ? ` · ${escapeHtml(e.notes)}` : ""}</div>
               </div>
               <div class="entry-actions">
+                ${renderEntryToggleHtml("daphnia", e.id, isIgnored)}
                 <button type="button" class="btn btn-xs btn-ghost" data-daphnia-edit="${escapeHtml(e.id)}" title="Edit or remove entry">Edit</button>
               </div>
             </div>`;
@@ -1311,7 +1355,8 @@
     const unit = exp.meta.concUnit || "mg/L";
     const view = state.views.vibrio;
 
-    const contactTimes = Array.from(new Set(exp.vibrioEntries.map((e) => Number(e.contactMin) || 30))).sort((a, b) => a - b);
+    const activeVibrio = exp.vibrioEntries.filter((e) => !e.ignored);
+    const contactTimes = Array.from(new Set(activeVibrio.map((e) => Number(e.contactMin) || 30))).sort((a, b) => a - b);
     const contactSel = $("vibrio-filter-contact");
     if (state.vibrioContactMin === null || !contactTimes.includes(state.vibrioContactMin)) {
       state.vibrioContactMin = contactTimes.includes(30) ? 30 : contactTimes[0] ?? 30;
@@ -1321,7 +1366,7 @@
         ? contactTimes.map((t) => `<option value="${t}" ${t === state.vibrioContactMin ? "selected" : ""}>${t} min</option>`).join("")
         : `<option value="30">30 min</option>`;
 
-    const activeForTime = exp.vibrioEntries.filter((e) => (Number(e.contactMin) || 30) === state.vibrioContactMin);
+    const activeForTime = activeVibrio.filter((e) => (Number(e.contactMin) || 30) === state.vibrioContactMin);
     const uniqueConcs = Array.from(
       new Set(activeForTime.filter((e) => e.sampleType !== "reference").map((e) => Number(e.concentration)).filter(Number.isFinite))
     ).sort((a, b) => a - b);
@@ -1337,7 +1382,7 @@
         : `<option value="${defaultCtrl}">${defaultCtrl}</option>`;
 
     const controlConc = state.vibrioControlConc;
-    const analysis = M.analyzeVibrio(exp.vibrioEntries, {
+    const analysis = M.analyzeVibrio(activeVibrio, {
       controlConc,
       contactMin: state.vibrioContactMin,
       targetPct: view.targetPct,
@@ -1358,17 +1403,20 @@
         .map((e) => {
           const isCtrl = e.sampleType === "control" || (e.sampleType !== "reference" && Number(e.concentration) === controlConc);
           const isRef = e.sampleType === "reference";
+          const isIgnored = Boolean(e.ignored);
           const tag = isRef ? "ZnSO₄ Ref" : `${e.concentration} ${escapeHtml(unit)}${isCtrl ? " · 2% NaCl" : ""}`;
           return `
-            <div class="entry-item ${e.id === editId ? "editing" : ""}">
+            <div class="entry-item ${e.id === editId ? "editing" : ""} ${isIgnored ? "ignored" : ""}">
               <div class="entry-main">
                 <div class="entry-top">
                   <span class="entry-conc-tag ${isCtrl ? "control" : ""}">${tag}</span>
                   <span class="entry-val">${Number(e.contactMin || 30)} min</span>
+                  ${isIgnored ? `<span class="entry-ignored-tag">Ignored</span>` : ""}
                 </div>
                 <div class="entry-sub">I₀=${e.i0} → Iₜ=${e.it}${e.well ? ` · ${escapeHtml(e.well)}` : ""}</div>
               </div>
               <div class="entry-actions">
+                ${renderEntryToggleHtml("vibrio", e.id, isIgnored)}
                 <button type="button" class="btn btn-xs btn-ghost" data-vibrio-edit="${escapeHtml(e.id)}" title="Edit or remove reading">Edit</button>
               </div>
             </div>`;
@@ -1588,30 +1636,34 @@
     if (!exp) return;
 
     const unit = exp.meta.concUnit || "";
-    const sorted = [...exp.dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
+    const sortedAll = [...exp.dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
+    const sorted = sortedAll.filter((d) => !d.ignored);
 
-    $("dil-list-count").textContent = sorted.length;
+    $("dil-list-count").textContent = sortedAll.length;
     const listEl = $("dil-entries-list");
-    if (sorted.length === 0) {
-      listEl.innerHTML = `<div class="empty-list">No dilution steps defined.<br/>Add rows above or load the Daphnia 20 mL preset.</div>`;
+    if (sortedAll.length === 0) {
+      listEl.innerHTML = `<div class="empty-list">No dilution steps defined.<br/>Add rows above or load a protocol preset.</div>`;
     } else {
       const editId = $("dil-edit-id").value;
-      listEl.innerHTML = sorted
-        .map(
-          (d) => `
-          <div class="entry-item ${d.id === editId ? "editing" : ""}">
+      listEl.innerHTML = sortedAll
+        .map((d) => {
+          const isIgnored = Boolean(d.ignored);
+          return `
+          <div class="entry-item ${d.id === editId ? "editing" : ""} ${isIgnored ? "ignored" : ""}">
             <div class="entry-main">
               <div class="entry-top">
                 <span class="entry-conc-tag">${d.concentration} ${escapeHtml(unit)}</span>
                 <span class="entry-val">${Number(d.mediumMl).toFixed(3)} + ${Number(d.toxicantMl).toFixed(3)} mL</span>
+                ${isIgnored ? `<span class="entry-ignored-tag">Ignored</span>` : ""}
               </div>
               <div class="entry-sub">${escapeHtml(d.mediumName || "Medium")} / ${escapeHtml(d.toxicantName || "Toxicant")} · Total ${(Number(d.mediumMl) + Number(d.toxicantMl)).toFixed(2)} mL</div>
             </div>
             <div class="entry-actions">
+              ${renderEntryToggleHtml("dil", d.id, isIgnored)}
               <button type="button" class="btn btn-xs btn-ghost" data-dil-edit="${escapeHtml(d.id)}" title="Edit or remove step">Edit</button>
             </div>
-          </div>`
-        )
+          </div>`;
+        })
         .join("");
     }
 
@@ -2192,6 +2244,7 @@
       if (!entry.date || !entry.time || !Number.isFinite(entry.concentration) || !Number.isFinite(entry.value)) return;
 
       if (editId) {
+        preserveIgnored(exp.odEntries, editId, entry);
         const idx = exp.odEntries.findIndex((e) => e.id === editId);
         if (idx >= 0) exp.odEntries[idx] = entry;
         toast("OD measurement updated");
@@ -2527,6 +2580,7 @@
       }
 
       if (editId) {
+        preserveIgnored(exp.cellCountEntries, editId, entry);
         const idx = exp.cellCountEntries.findIndex((e) => e.id === editId);
         if (idx >= 0) exp.cellCountEntries[idx] = entry;
         toast("Cell count updated");
@@ -2643,11 +2697,12 @@
       const val = ev.target.value;
       const exp = getActiveExp();
       if (!exp) return;
-      if (val === "avg_all" && exp.cellCountEntries.length > 0) {
-        const avg = M.mean(exp.cellCountEntries.map((e) => Number(e.cellsPerMl)).filter(Number.isFinite));
+      const activeCc = exp.cellCountEntries.filter((e) => !e.ignored);
+      if (val === "avg_all" && activeCc.length > 0) {
+        const avg = M.mean(activeCc.map((e) => Number(e.cellsPerMl)).filter(Number.isFinite));
         $("inoc-c1").value = Math.round(avg);
       } else if (val !== "custom") {
-        const found = exp.cellCountEntries.find((e) => e.id === val);
+        const found = activeCc.find((e) => e.id === val);
         if (found) $("inoc-c1").value = Math.round(found.cellsPerMl);
       }
       renderInoculationResult();
@@ -2693,10 +2748,12 @@
         ntA: Number($("lemna-nt-a").value),
         n0B: $("lemna-n0-b").value !== "" ? Number($("lemna-n0-b").value) : null,
         ntB: $("lemna-nt-b").value !== "" ? Number($("lemna-nt-b").value) : null,
+        notes: $("lemna-notes").value.trim(),
       };
       if (!Number.isFinite(entry.dilution) || !Number.isFinite(entry.n0A) || !Number.isFinite(entry.ntA)) return;
 
       if (editId) {
+        preserveIgnored(exp.lemnaEntries, editId, entry);
         const idx = exp.lemnaEntries.findIndex((e) => e.id === editId);
         if (idx >= 0) exp.lemnaEntries[idx] = entry;
         toast("Lemna sample updated");
@@ -2833,6 +2890,7 @@
         toxicantName: $("dil-tox-name").value.trim() || "Toxicant",
       };
       if (editId) {
+        preserveIgnored(exp.dilutions, editId, entry);
         const idx = exp.dilutions.findIndex((d) => d.id === editId);
         if (idx >= 0) exp.dilutions[idx] = entry;
         toast("Dilution step updated");
@@ -2852,21 +2910,8 @@
     });
 
     $("btn-dil-daphnia").addEventListener("click", () => {
-      const exp = getActiveExp();
-      if (!exp) return;
-      if (exp.dilutions.length > 0 && !confirm("Replace current dilution table with Daphnia 20 mL preset?")) return;
-      exp.dilutions = [
-        { id: S.uid("dil"), concentration: 0, mediumMl: 20, toxicantMl: 0, mediumName: "Tap water", toxicantName: "Insecticide" },
-        { id: S.uid("dil"), concentration: 0.25, mediumMl: 19.975, toxicantMl: 0.025, mediumName: "Tap water", toxicantName: "Insecticide" },
-        { id: S.uid("dil"), concentration: 0.5, mediumMl: 19.95, toxicantMl: 0.05, mediumName: "Tap water", toxicantName: "Insecticide" },
-        { id: S.uid("dil"), concentration: 1, mediumMl: 19.9, toxicantMl: 0.1, mediumName: "Tap water", toxicantName: "Insecticide" },
-        { id: S.uid("dil"), concentration: 2, mediumMl: 19.8, toxicantMl: 0.2, mediumName: "Tap water", toxicantName: "Insecticide" },
-      ];
-      resetDilForm();
-      persist();
-      renderExperimentHeader();
-      renderDilutionsTab();
-      toast("Loaded Daphnia 20 mL dilution series");
+      const presetKey = $("dil-preset-select")?.value || "daphnia";
+      applyDilutionPreset(presetKey);
     });
 
     $("dil-entries-list").addEventListener("click", (ev) => {
@@ -2936,8 +2981,9 @@
 
     $("btn-dil-export-csv").addEventListener("click", () => {
       const exp = getActiveExp();
-      if (!exp || exp.dilutions.length === 0) return toast("No dilutions to export");
-      const sorted = [...exp.dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
+      const activeDil = (exp?.dilutions || []).filter((d) => !d.ignored);
+      if (!exp || activeDil.length === 0) return toast("No dilutions to export");
+      const sorted = [...activeDil].sort((a, b) => Number(a.concentration) - Number(b.concentration));
       const headers = ["Concentration", "Medium_Name", "Medium_mL", "Toxicant_Name", "Toxicant_mL", "Total_mL"];
       const rows = sorted.map((d) => [
         d.concentration,
@@ -2988,6 +3034,7 @@
         notes: $("daphnia-notes").value.trim(),
       };
       if (editId) {
+        preserveIgnored(exp.daphniaEntries, editId, entry);
         const idx = exp.daphniaEntries.findIndex((e) => e.id === editId);
         if (idx >= 0) exp.daphniaEntries[idx] = entry;
         toast("Daphnia entry updated");
@@ -3165,6 +3212,7 @@
         it,
       };
       if (editId) {
+        preserveIgnored(exp.vibrioEntries, editId, entry);
         const idx = exp.vibrioEntries.findIndex((e) => e.id === editId);
         if (idx >= 0) exp.vibrioEntries[idx] = entry;
         toast("Vibrio reading updated");
@@ -3333,7 +3381,7 @@
       if (state.dilChartOpen) {
         const exp = getActiveExp();
         if (exp) {
-          const sorted = [...exp.dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
+          const sorted = exp.dilutions.filter((d) => !d.ignored).sort((a, b) => Number(a.concentration) - Number(b.concentration));
           C.renderDilutionChart(sorted, exp.meta.concUnit || "mg/L");
         }
       }
@@ -3378,6 +3426,36 @@
           ta.scrollTop = ta.scrollHeight;
         }
       }
+    });
+
+    // ---------- Entry Include / Ignore Toggle Switches ----------
+    document.addEventListener("change", (ev) => {
+      const input = ev.target.closest("input[data-ignore-type]");
+      if (!input) return;
+      const exp = getActiveExp();
+      if (!exp) return;
+      const type = input.dataset.ignoreType;
+      const id = input.dataset.ignoreId;
+      const map = {
+        od: { list: exp.odEntries, render: renderOdTab },
+        cc: { list: exp.cellCountEntries, render: renderCellCountTab },
+        lemna: { list: exp.lemnaEntries, render: renderLemnaTab },
+        daphnia: { list: exp.daphniaEntries || [], render: renderDaphniaTab },
+        vibrio: { list: exp.vibrioEntries || [], render: renderVibrioTab },
+        dil: { list: exp.dilutions, render: renderDilutionsTab },
+      };
+      const target = map[type];
+      if (!target) return;
+      const item = target.list.find((e) => e.id === id);
+      if (!item) return;
+      if (input.checked) {
+        delete item.ignored;
+      } else {
+        item.ignored = true;
+      }
+      persist();
+      renderExperimentHeader();
+      target.render();
     });
   }
 

@@ -1926,3 +1926,83 @@ table.sci-table tbody tr.row-highlighted {
   background: rgba(225, 29, 72, 0.14);
   color: var(--danger);
 }
+
+/* ---------- Entry Include/Ignore Toggle Switch ---------- */
+.entry-item.ignored {
+  opacity: 0.56;
+  background: var(--bg-surface);
+  border-style: dashed;
+  filter: grayscale(0.78);
+}
+
+.entry-item.ignored:hover {
+  opacity: 0.82;
+}
+
+.entry-item.ignored .entry-val {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.entry-ignored-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--border);
+  color: var(--text-secondary);
+}
+
+.entry-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.entry-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.entry-toggle-track {
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  position: relative;
+  transition: background-color 0.16s ease;
+}
+
+.entry-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.16s ease;
+}
+
+.entry-toggle input:checked + .entry-toggle-track {
+  background: var(--accent);
+}
+
+.entry-toggle input:checked + .entry-toggle-track::after {
+  transform: translateX(13px);
+}
+
+.entry-toggle input:focus-visible + .entry-toggle-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
