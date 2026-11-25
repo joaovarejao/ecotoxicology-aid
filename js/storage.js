@@ -2,7 +2,7 @@
  * Ecotoxicology Aid — Local Storage & Save File Management
  * Starts empty with no hardcoded seed data.
  * Persists open experiments and the last active experiment/tab locally in localStorage,
- * and reads/writes portable .json save files.
+ * and reads/writes portable .json save files (plus File System Access handles for auto-save).
  */
 (function (global) {
   "use strict";
@@ -11,6 +11,8 @@
   const STORAGE_KEY = "ecotox_aid_workspace_v2";
   const THEME_KEY = "ecotox_aid_theme_v1";
   const SAVE_FORMAT = "ecotox-aid-save";
+  const HANDLE_DB_NAME = "ecotox_aid_handles_v1";
+  const HANDLE_STORE_NAME = "handles";
 
   function uid(prefix = "id") {
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -256,6 +258,146 @@
     return lines.join("\n");
   }
 
+  // ---------- File System Access API & IndexedDB File Handle Persistence ----------
+
+  function supportsFileHandles() {
+    return (
+      typeof global.showOpenFilePicker === "function" &&
+      typeof global.showSaveFilePicker === "function" &&
+      global.isSecureContext !== false
+    );
+  }
+
+  function openHandlesDb() {
+    return new Promise((resolve, reject) => {
+      if (typeof global.indexedDB === "undefined") {
+        reject(new Error("IndexedDB unavailable"));
+        return;
+      }
+      const req = global.indexedDB.open(HANDLE_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(HANDLE_STORE_NAME)) {
+          db.createObjectStore(HANDLE_STORE_NAME, { keyPath: "expId" });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("Failed to open handles DB"));
+    });
+  }
+
+  async function saveFileHandleRecord(expId, record) {
+    if (!expId) return false;
+    try {
+      const db = await openHandlesDb();
+      return await new Promise((resolve) => {
+        const tx = db.transaction(HANDLE_STORE_NAME, "readwrite");
+        tx.objectStore(HANDLE_STORE_NAME).put({
+          expId,
+          handle: record.handle || null,
+          fileName: record.fileName || (record.handle && record.handle.name) || "",
+          formatType: record.formatType === "workspace" ? "workspace" : "experiment",
+          autoSave: record.autoSave !== false,
+          updatedAt: new Date().toISOString(),
+        });
+        tx.oncomplete = () => {
+          db.close();
+          resolve(true);
+        };
+        tx.onerror = () => {
+          db.close();
+          resolve(false);
+        };
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  async function loadFileHandleRecord(expId) {
+    if (!expId) return null;
+    try {
+      const db = await openHandlesDb();
+      return await new Promise((resolve) => {
+        const tx = db.transaction(HANDLE_STORE_NAME, "readonly");
+        const req = tx.objectStore(HANDLE_STORE_NAME).get(expId);
+        req.onsuccess = () => {
+          db.close();
+          resolve(req.result || null);
+        };
+        req.onerror = () => {
+          db.close();
+          resolve(null);
+        };
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async function deleteFileHandleRecord(expId) {
+    if (!expId) return false;
+    try {
+      const db = await openHandlesDb();
+      return await new Promise((resolve) => {
+        const tx = db.transaction(HANDLE_STORE_NAME, "readwrite");
+        tx.objectStore(HANDLE_STORE_NAME).delete(expId);
+        tx.oncomplete = () => {
+          db.close();
+          resolve(true);
+        };
+        tx.onerror = () => {
+          db.close();
+          resolve(false);
+        };
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  async function queryHandlePermission(handle, mode = "readwrite") {
+    if (!handle) return "denied";
+    try {
+      if (typeof handle.queryPermission === "function") {
+        return await handle.queryPermission({ mode });
+      }
+      return "granted";
+    } catch {
+      return "denied";
+    }
+  }
+
+  async function requestHandlePermission(handle, mode = "readwrite") {
+    if (!handle) return "denied";
+    try {
+      if (typeof handle.requestPermission === "function") {
+        return await handle.requestPermission({ mode });
+      }
+      return "granted";
+    } catch {
+      return "denied";
+    }
+  }
+
+  async function writeContentToHandle(handle, content) {
+    if (!handle || typeof handle.createWritable !== "function") {
+      throw new Error("File handle does not support writing.");
+    }
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(content);
+      await writable.close();
+    } catch (err) {
+      try {
+        await writable.abort();
+      } catch {
+        // ignore abort error
+      }
+      throw err;
+    }
+  }
+
   Ecotox.Storage = {
     SAVE_FORMAT,
     uid,
@@ -270,5 +412,12 @@
     saveTheme,
     downloadFile,
     toCSV,
+    supportsFileHandles,
+    saveFileHandleRecord,
+    loadFileHandleRecord,
+    deleteFileHandleRecord,
+    queryHandlePermission,
+    requestHandlePermission,
+    writeContentToHandle,
   };
 })(typeof window !== "undefined" ? window : globalThis);

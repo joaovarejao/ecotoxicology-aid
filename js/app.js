@@ -188,6 +188,193 @@
     };
   }
 
+  const fileBindings = new Map();
+  const autoSaveTimers = new Map();
+  const autoSaveQueues = new Map();
+
+  function renderAutoSaveStatus() {
+    const btn = $("btn-autosave-status");
+    const lbl = $("autosave-label");
+    if (!btn || !lbl) return;
+    const exp = getActiveExp();
+    if (!exp) {
+      btn.hidden = true;
+      return;
+    }
+
+    btn.hidden = false;
+    btn.classList.remove("is-active", "is-saving", "is-prompt", "is-paused", "is-error");
+
+    const b = fileBindings.get(exp.id);
+    if (b && b.handle) {
+      const name = b.fileName || b.handle.name || "save.json";
+      if (b.status === "saving") {
+        btn.classList.add("is-saving");
+        lbl.textContent = `Saving ${name}...`;
+        btn.title = `Writing changes to ${name}...`;
+      } else if (b.status === "error") {
+        btn.classList.add("is-error");
+        lbl.textContent = `Save Failed (${name})`;
+        btn.title = `${b.lastError || "Disk write failed"}. Click to retry saving to ${name}.`;
+      } else if (!b.autoSave) {
+        btn.classList.add("is-paused");
+        lbl.textContent = `Auto-Save Off (${name})`;
+        btn.title = `Auto-save is paused for ${name}. Click to turn ON and save now.`;
+      } else if (b.perm !== "granted") {
+        btn.classList.add("is-prompt");
+        lbl.textContent = `Resume Auto-Save (${name})`;
+        btn.title = `Click to grant write permission and resume auto-saving to ${name}.`;
+      } else {
+        btn.classList.add("is-active");
+        lbl.textContent = b.lastSavedAt ? `Auto-Saved · ${name}` : `Auto-Save: ${name}`;
+        btn.title = `Auto-saving all edits directly to ${name}${b.lastSavedAt ? ` (last saved at ${b.lastSavedAt})` : ""}. Click to pause.`;
+      }
+      return;
+    }
+
+    if (S.supportsFileHandles()) {
+      lbl.textContent = "Auto-Save: Link .json";
+      btn.title = "Link or create a .json file on disk to auto-save changes automatically";
+    } else {
+      lbl.textContent = "Local Auto-Save";
+      btn.title = "Changes auto-save in browser storage. Open via localhost/HTTPS in Chrome/Edge to auto-save directly to disk .json files.";
+    }
+  }
+
+  async function hydrateFileBinding(expId) {
+    if (!expId) {
+      renderAutoSaveStatus();
+      return;
+    }
+    if (fileBindings.has(expId)) {
+      const existing = fileBindings.get(expId);
+      if (existing.handle) {
+        existing.perm = await S.queryHandlePermission(existing.handle, "readwrite");
+      }
+      renderAutoSaveStatus();
+      return;
+    }
+    const rec = await S.loadFileHandleRecord(expId);
+    if (rec && rec.handle) {
+      const perm = await S.queryHandlePermission(rec.handle, "readwrite");
+      fileBindings.set(expId, {
+        expId,
+        handle: rec.handle,
+        fileName: rec.fileName || rec.handle.name || "save.json",
+        formatType: rec.formatType === "workspace" ? "workspace" : "experiment",
+        autoSave: rec.autoSave !== false,
+        perm,
+        status: "idle",
+        lastSavedAt: null,
+        lastError: "",
+      });
+    }
+    renderAutoSaveStatus();
+  }
+
+  async function writeBindingNow(expId) {
+    const exp = state.workspace?.experiments?.find((e) => e.id === expId);
+    const b = fileBindings.get(expId);
+    if (!exp || !b || !b.handle || !b.autoSave) return false;
+
+    const prevQueue = autoSaveQueues.get(expId) || Promise.resolve();
+    const job = prevQueue
+      .catch(() => {})
+      .then(async () => {
+        b.perm = await S.queryHandlePermission(b.handle, "readwrite");
+        if (b.perm !== "granted") {
+          renderAutoSaveStatus();
+          return false;
+        }
+        const payload =
+          b.formatType === "workspace"
+            ? JSON.stringify(state.workspace, null, 2)
+            : S.serializeExperimentSave(exp);
+        b.status = "saving";
+        renderAutoSaveStatus();
+        try {
+          await S.writeContentToHandle(b.handle, payload);
+          b.status = "saved";
+          b.lastError = "";
+          b.lastSavedAt = nowTimeHm();
+          renderAutoSaveStatus();
+          return true;
+        } catch (err) {
+          b.status = "error";
+          b.lastError = err?.message || "Write failed";
+          renderAutoSaveStatus();
+          return false;
+        }
+      });
+    autoSaveQueues.set(expId, job);
+    return job;
+  }
+
+  function scheduleAutoSaveToFile(expId) {
+    if (!expId) return;
+    const b = fileBindings.get(expId);
+    if (!b || !b.handle || !b.autoSave) return;
+    const existingTimer = autoSaveTimers.get(expId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(() => {
+      autoSaveTimers.delete(expId);
+      writeBindingNow(expId);
+    }, 420);
+    autoSaveTimers.set(expId, timer);
+  }
+
+  function flushAutoSave(expId) {
+    if (!expId) return;
+    const t = autoSaveTimers.get(expId);
+    if (t) {
+      clearTimeout(t);
+      autoSaveTimers.delete(expId);
+      writeBindingNow(expId);
+    }
+  }
+
+  async function linkSaveFileForExp(exp) {
+    if (!exp) return false;
+    if (!S.supportsFileHandles()) {
+      toast("Direct file auto-save needs Chrome/Edge on localhost or HTTPS. Saving download instead.");
+      return false;
+    }
+    try {
+      const handle = await global.showSaveFilePicker({
+        suggestedName: `${slugify(exp.name)}.json`,
+        types: [
+          {
+            description: "Ecotoxicology Aid Save (.json)",
+            accept: { "application/json": [".json"] },
+          },
+        ],
+      });
+      if (!handle) return false;
+      let perm = await S.queryHandlePermission(handle, "readwrite");
+      if (perm !== "granted") perm = await S.requestHandlePermission(handle, "readwrite");
+      const binding = {
+        expId: exp.id,
+        handle,
+        fileName: handle.name || `${slugify(exp.name)}.json`,
+        formatType: "experiment",
+        autoSave: true,
+        perm,
+        status: "idle",
+        lastSavedAt: null,
+        lastError: "",
+      };
+      fileBindings.set(exp.id, binding);
+      await S.saveFileHandleRecord(exp.id, binding);
+      const ok = await writeBindingNow(exp.id);
+      renderAutoSaveStatus();
+      if (ok) toast(`Auto-save linked → "${binding.fileName}"`);
+      return ok;
+    } catch (err) {
+      if (err && err.name === "AbortError") return "aborted";
+      return false;
+    }
+  }
+
   function persist() {
     const exp = getActiveExp();
     if (exp) {
@@ -199,6 +386,9 @@
     }
     state.workspace.activeTab = state.activeTab;
     S.saveWorkspace(state.workspace);
+    if (exp) {
+      scheduleAutoSaveToFile(exp.id);
+    }
   }
 
   function toast(message, undoFn = null) {
@@ -321,6 +511,8 @@
 
     $("empty-workspace-screen").hidden = hasExp;
     $("main-tabbar").hidden = !hasExp;
+
+    renderAutoSaveStatus();
 
     if (!hasExp) {
       sel.innerHTML = `<option value="">— No experiment open —</option>`;
@@ -2146,65 +2338,99 @@
     });
   }
 
-  function openSaveFileFromBlob(file) {
+  async function openSaveFileFromBlob(file, fileHandle = null, knownPerm = null) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const result = S.parseSaveFile(reader.result);
-        let openedId = null;
-        let loadedCount = 0;
+    try {
+      const text = await file.text();
+      const result = S.parseSaveFile(text);
+      let openedId = null;
+      let loadedCount = 0;
+      let openedAsCopy = false;
 
-        for (const imp of result.experiments) {
-          const existingIdx = state.workspace.experiments.findIndex((e) => e.id === imp.id);
-          if (existingIdx >= 0) {
-            const replace = confirm(
-              `"${imp.name}" is already in your workspace.\n\nClick OK to reload/overwrite it from this save file, or Cancel to open it as a separate copy.`
-            );
-            if (replace) {
-              state.workspace.experiments[existingIdx] = imp;
-              openedId = imp.id;
-            } else {
-              imp.id = S.uid("exp");
-              imp.name = `${imp.name} (Copy)`;
-              state.workspace.experiments.push(imp);
-              openedId = imp.id;
-            }
+      const prevActive = getActiveExp();
+      if (prevActive) flushAutoSave(prevActive.id);
+
+      for (const imp of result.experiments) {
+        const existingIdx = state.workspace.experiments.findIndex((e) => e.id === imp.id);
+        if (existingIdx >= 0) {
+          const replace = confirm(
+            `"${imp.name}" is already in your workspace.\n\nClick OK to reload/overwrite it from this save file, or Cancel to open it as a separate copy.`
+          );
+          if (replace) {
+            state.workspace.experiments[existingIdx] = imp;
+            openedId = imp.id;
           } else {
+            imp.id = S.uid("exp");
+            imp.name = `${imp.name} (Copy)`;
             state.workspace.experiments.push(imp);
-            if (imp.id === result.preferredActiveId || openedId === null) {
-              openedId = imp.id;
-            }
+            openedId = imp.id;
+            openedAsCopy = true;
           }
-          loadedCount++;
+        } else {
+          state.workspace.experiments.push(imp);
+          if (imp.id === result.preferredActiveId || openedId === null) {
+            openedId = imp.id;
+          }
+        }
+        loadedCount++;
+      }
+
+      if (loadedCount > 0 && openedId) {
+        const isJsonFile = fileHandle && !/\.html?$/i.test(file.name || fileHandle.name || "");
+        if (isJsonFile && !openedAsCopy) {
+          const perm = knownPerm || (await S.queryHandlePermission(fileHandle, "readwrite"));
+          const targets = result.type === "workspace" ? result.experiments.map((e) => e.id) : [openedId];
+          for (const targetId of targets) {
+            const binding = {
+              expId: targetId,
+              handle: fileHandle,
+              fileName: file.name || fileHandle.name || "save.json",
+              formatType: result.type === "workspace" ? "workspace" : "experiment",
+              autoSave: true,
+              perm,
+              status: "saved",
+              lastSavedAt: null,
+              lastError: "",
+            };
+            fileBindings.set(targetId, binding);
+            await S.saveFileHandleRecord(targetId, binding);
+          }
         }
 
-        if (loadedCount > 0 && openedId) {
-          state.workspace.activeExperimentId = openedId;
-          syncChartSettingsFromExp(getActiveExp());
-          state.odSelectedWavelength = null;
-          state.odControlConc = null;
-          state.ccControlConc = null;
-          state.lemnaControlConc = null;
+        state.workspace.activeExperimentId = openedId;
+        syncChartSettingsFromExp(getActiveExp());
+        state.odSelectedWavelength = null;
+        state.odControlConc = null;
+        state.ccControlConc = null;
+        state.lemnaControlConc = null;
         state.daphniaControlConc = null;
         state.vibrioControlConc = null;
         state.vibrioContactMin = null;
-          resetOdForm(false);
-          resetCcForm(false);
-          resetLemnaForm();
-          resetDaphniaForm();
-          resetVibrioForm();
-          resetDilForm();
-          persist();
-          renderAll();
-          const active = getActiveExp();
+        resetOdForm(false);
+        resetCcForm(false);
+        resetLemnaForm();
+        resetDaphniaForm();
+        resetVibrioForm();
+        resetDilForm();
+        persist();
+        renderAll();
+        if (!isJsonFile) hydrateFileBinding(openedId);
+
+        const active = getActiveExp();
+        const b = fileBindings.get(openedId);
+        if (b && b.handle) {
+          if (b.perm === "granted") {
+            toast(`Opened "${active.name}" · Auto-save ON (${b.fileName})`);
+          } else {
+            toast(`Opened "${active.name}" · Click "Resume Auto-Save" to write back to ${b.fileName}`);
+          }
+        } else {
           toast(loadedCount === 1 ? `Opened "${active.name}"` : `Opened ${loadedCount} experiments`);
         }
-      } catch (err) {
-        alert(`Could not open save file: ${err.message}`);
       }
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      alert(`Could not open save file: ${err.message}`);
+    }
   }
 
   // ==========================================================================
@@ -2323,6 +2549,8 @@
     // Experiment Dropdown
     $("experiment-select").addEventListener("change", (ev) => {
       if (!ev.target.value) return;
+      const prevExp = getActiveExp();
+      if (prevExp) flushAutoSave(prevExp.id);
       state.workspace.activeExperimentId = ev.target.value;
       syncChartSettingsFromExp(getActiveExp());
       state.odSelectedWavelength = null;
@@ -2341,6 +2569,7 @@
       resetDilForm();
       persist();
       renderAll();
+      hydrateFileBinding(getActiveExp()?.id);
       toast(`Switched to "${getActiveExp().name}"`);
     });
 
@@ -2349,8 +2578,42 @@
     $("btn-empty-new").addEventListener("click", () => openExperimentModal("create"));
     $("btn-edit-exp").addEventListener("click", () => openExperimentModal("edit"));
 
-    $("btn-open-save").addEventListener("click", () => $("import-file-input").click());
-    $("btn-empty-open").addEventListener("click", () => $("import-file-input").click());
+    async function triggerOpenFile() {
+      if (S.supportsFileHandles()) {
+        try {
+          const [handle] = await global.showOpenFilePicker({
+            multiple: false,
+            types: [
+              {
+                description: "Ecotoxicology Save Files (.json, .html)",
+                accept: {
+                  "application/json": [".json"],
+                  "text/html": [".html", ".htm"],
+                },
+              },
+            ],
+          });
+          if (!handle) return;
+          const isJson = !/\.html?$/i.test(handle.name || "");
+          let perm = "denied";
+          if (isJson) {
+            perm = await S.queryHandlePermission(handle, "readwrite");
+            if (perm !== "granted") {
+              perm = await S.requestHandlePermission(handle, "readwrite");
+            }
+          }
+          const file = await handle.getFile();
+          await openSaveFileFromBlob(file, isJson ? handle : null, perm);
+          return;
+        } catch (err) {
+          if (err && err.name === "AbortError") return;
+        }
+      }
+      $("import-file-input").click();
+    }
+
+    $("btn-open-save").addEventListener("click", triggerOpenFile);
+    $("btn-empty-open").addEventListener("click", triggerOpenFile);
 
     $("import-file-input").addEventListener("change", (ev) => {
       const file = ev.target.files?.[0];
@@ -2358,9 +2621,76 @@
       ev.target.value = "";
     });
 
-    $("btn-save-exp").addEventListener("click", () => {
+    $("btn-autosave-status")?.addEventListener("click", async () => {
       const exp = getActiveExp();
       if (!exp) return;
+      const b = fileBindings.get(exp.id);
+      if (!b || !b.handle) {
+        const res = await linkSaveFileForExp(exp);
+        if (res === false && S.supportsFileHandles()) {
+          toast("Could not link save file");
+        }
+        return;
+      }
+
+      if (b.perm !== "granted") {
+        b.perm = await S.requestHandlePermission(b.handle, "readwrite");
+        if (b.perm === "granted") {
+          b.autoSave = true;
+          await S.saveFileHandleRecord(exp.id, b);
+          await writeBindingNow(exp.id);
+          toast(`Auto-save active → "${b.fileName}"`);
+        } else {
+          renderAutoSaveStatus();
+          toast("Write permission denied");
+        }
+        return;
+      }
+
+      if (b.status === "error") {
+        const ok = await writeBindingNow(exp.id);
+        if (ok) toast(`Saved "${b.fileName}"`);
+        return;
+      }
+
+      b.autoSave = !b.autoSave;
+      await S.saveFileHandleRecord(exp.id, b);
+      if (b.autoSave) {
+        await writeBindingNow(exp.id);
+        toast(`Auto-save ON → "${b.fileName}"`);
+      } else {
+        const t = autoSaveTimers.get(exp.id);
+        if (t) {
+          clearTimeout(t);
+          autoSaveTimers.delete(exp.id);
+        }
+        renderAutoSaveStatus();
+        toast(`Auto-save paused for "${b.fileName}"`);
+      }
+    });
+
+    $("btn-save-exp").addEventListener("click", async () => {
+      const exp = getActiveExp();
+      if (!exp) return;
+      saveChartSettingsToExp();
+      const b = fileBindings.get(exp.id);
+      if (b && b.handle) {
+        if (b.perm !== "granted") {
+          b.perm = await S.requestHandlePermission(b.handle, "readwrite");
+        }
+        if (b.perm === "granted") {
+          b.autoSave = true;
+          await S.saveFileHandleRecord(exp.id, b);
+          const ok = await writeBindingNow(exp.id);
+          if (ok) {
+            toast(`Saved "${b.fileName}"`);
+            return;
+          }
+        }
+      } else if (S.supportsFileHandles()) {
+        const res = await linkSaveFileForExp(exp);
+        if (res === "aborted" || res === true) return;
+      }
       const filename = `${slugify(exp.name)}.json`;
       S.downloadFile(filename, S.serializeExperimentSave(exp), "application/json");
       toast(`Saved "${filename}"`);
@@ -2421,12 +2751,41 @@
       dragDepth = Math.max(0, dragDepth - 1);
       if (dragDepth === 0) document.body.classList.remove("drag-over");
     });
-    window.addEventListener("drop", (ev) => {
+    window.addEventListener("drop", async (ev) => {
       ev.preventDefault();
       dragDepth = 0;
       document.body.classList.remove("drag-over");
-      const file = ev.dataTransfer?.files?.[0];
-      if (file) openSaveFileFromBlob(file);
+      const items = ev.dataTransfer?.items;
+      const handlePromise =
+        items && items[0] && typeof items[0].getAsFileSystemHandle === "function"
+          ? items[0].getAsFileSystemHandle().catch(() => null)
+          : null;
+      let file = ev.dataTransfer?.files?.[0] || null;
+      let handle = null;
+      if (handlePromise) {
+        const h = await handlePromise;
+        if (h && h.kind === "file") {
+          handle = h;
+          if (!file) {
+            try {
+              file = await h.getFile();
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+      if (file) {
+        const isJson = handle && !/\.html?$/i.test(file.name || handle.name || "");
+        let perm = null;
+        if (isJson) {
+          perm = await S.queryHandlePermission(handle, "readwrite");
+          if (perm !== "granted") {
+            perm = await S.requestHandlePermission(handle, "readwrite");
+          }
+        }
+        openSaveFileFromBlob(file, isJson ? handle : null, perm);
+      }
     });
 
     // Experiment Create/Edit Form
@@ -2502,6 +2861,13 @@
       if (!cur) return;
       handleArmedClick($("btn-delete-exp"), "Click again to permanently delete", () => {
         if (!confirm(`Permanently delete experiment "${cur.name}" and all its measurements?`)) return;
+        fileBindings.delete(cur.id);
+        const delTimer = autoSaveTimers.get(cur.id);
+        if (delTimer) {
+          clearTimeout(delTimer);
+          autoSaveTimers.delete(cur.id);
+        }
+        S.deleteFileHandleRecord(cur.id);
         state.workspace.experiments = state.workspace.experiments.filter((e) => e.id !== cur.id);
         state.workspace.activeExperimentId =
           state.workspace.experiments.length > 0 ? state.workspace.experiments[0].id : null;
@@ -4038,6 +4404,17 @@
     bindEvents();
     updateCellCountModeUI();
     renderAll();
+    if (exp) hydrateFileBinding(exp.id);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        const cur = getActiveExp();
+        if (cur) flushAutoSave(cur.id);
+      }
+    });
+    window.addEventListener("pagehide", () => {
+      const cur = getActiveExp();
+      if (cur) flushAutoSave(cur.id);
+    });
   }
 
   document.addEventListener("DOMContentLoaded", init);

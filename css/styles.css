@@ -184,6 +184,83 @@ body {
   flex-shrink: 0;
 }
 
+.autosave-pill {
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0 10px;
+}
+
+.autosave-pill[hidden] {
+  display: none;
+}
+
+.autosave-pill #autosave-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autosave-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.autosave-pill.is-active {
+  background: var(--accent-soft);
+  border-color: rgba(13, 148, 136, 0.4);
+  color: var(--accent);
+}
+
+.autosave-pill.is-active .autosave-dot {
+  background: var(--accent);
+}
+
+.autosave-pill.is-saving {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.autosave-pill.is-saving .autosave-dot {
+  background: var(--accent);
+  animation: pulseDot 0.9s infinite ease-in-out;
+}
+
+.autosave-pill.is-prompt {
+  background: var(--amber-soft);
+  border-color: rgba(217, 119, 6, 0.45);
+  color: var(--amber);
+}
+
+.autosave-pill.is-prompt .autosave-dot {
+  background: var(--amber);
+}
+
+.autosave-pill.is-paused {
+  opacity: 0.78;
+}
+
+.autosave-pill.is-error {
+  background: var(--danger-soft);
+  border-color: rgba(225, 29, 72, 0.45);
+  color: var(--danger);
+}
+
+.autosave-pill.is-error .autosave-dot {
+  background: var(--danger);
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
 /* ---------- Buttons & Inputs ---------- */
 
 .btn {
