@@ -9,22 +9,224 @@
 
   const Ecotox = (global.Ecotox = global.Ecotox || {});
 
-  const SERIES_COLORS = [
-    "#0d9488", // teal
-    "#2563eb", // blue
-    "#d97706", // amber
-    "#9333ea", // purple
-    "#e11d48", // rose/crimson
-    "#059669", // emerald
-    "#0891b2", // cyan
-    "#ea580c", // orange
-    "#4f46e5", // indigo
-    "#be123c", // deep rose
-  ];
+  const PALETTES = {
+    default: {
+      label: "Lab Default",
+      colors: ["#0d9488", "#2563eb", "#d97706", "#9333ea", "#e11d48", "#059669", "#0891b2", "#ea580c", "#4f46e5", "#be123c"],
+    },
+    tab10: {
+      label: "Matplotlib (tab10)",
+      colors: ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"],
+    },
+    okabe: {
+      label: "Okabe-Ito (Safe)",
+      colors: ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7", "#56B4E9", "#F0E442", "#111827"],
+    },
+    viridis: {
+      label: "Viridis",
+      colors: ["#440154", "#414487", "#2a788e", "#22a884", "#7ad151", "#fde725"],
+    },
+    plasma: {
+      label: "Plasma",
+      colors: ["#0d0887", "#6a00a8", "#b12a90", "#e16462", "#fca636", "#f0f921"],
+    },
+    ocean: {
+      label: "Ocean Teal-Blue",
+      colors: ["#0f766e", "#0284c7", "#1d4ed8", "#0369a1", "#059669", "#0d9488", "#38bdf8"],
+    },
+    mono: {
+      label: "Monochrome (Print)",
+      colors: ["#0f172a", "#334155", "#475569", "#64748b", "#94a3b8", "#cbd5e1"],
+    },
+  };
 
-  function getConcColor(conc, sortedAllConcs) {
+  const SERIES_COLORS = PALETTES.default.colors;
+
+  const DEFAULT_CHART_STYLE = {
+    palette: "default",
+    primaryColor: "",
+    seriesColors: {},
+    lineStyle: "solid",
+    lineWidth: 2.2,
+    pointStyle: "auto",
+    pointSize: 7,
+  };
+
+  const renderedSpecs = new Map();
+
+  function normalizeStyleOptions(raw = {}) {
+    const s = raw || {};
+    const lw = Number(s.lineWidth);
+    const ps = Number(s.pointSize);
+    return {
+      palette: PALETTES[s.palette] ? s.palette : "default",
+      primaryColor: typeof s.primaryColor === "string" ? s.primaryColor.trim() : "",
+      seriesColors: s.seriesColors && typeof s.seriesColors === "object" ? { ...s.seriesColors } : {},
+      lineStyle: ["solid", "dash", "dot", "dashdot", "none"].includes(s.lineStyle) ? s.lineStyle : "solid",
+      lineWidth: Number.isFinite(lw) && lw >= 0.5 && lw <= 8 ? lw : 2.2,
+      pointStyle: typeof s.pointStyle === "string" && s.pointStyle ? s.pointStyle : "auto",
+      pointSize: Number.isFinite(ps) && ps >= 2 && ps <= 18 ? ps : 7,
+    };
+  }
+
+  function mergeStyleOptions(baseStyle = {}, overrideStyle = {}) {
+    const b = normalizeStyleOptions(baseStyle);
+    const o = overrideStyle || {};
+    return normalizeStyleOptions({
+      ...b,
+      ...o,
+      seriesColors: { ...(b.seriesColors || {}), ...(o.seriesColors || {}) },
+    });
+  }
+
+  function getPaletteColors(paletteKey = "default") {
+    return (PALETTES[paletteKey] || PALETTES.default).colors;
+  }
+
+  function getConcColor(conc, sortedAllConcs, paletteKey = "default", seriesColors = null) {
+    if (seriesColors && seriesColors[String(conc)]) {
+      return seriesColors[String(conc)];
+    }
+    const palette = getPaletteColors(paletteKey);
     const idx = sortedAllConcs ? sortedAllConcs.indexOf(Number(conc)) : 0;
-    return SERIES_COLORS[(idx >= 0 ? idx : 0) % SERIES_COLORS.length];
+    return palette[(idx >= 0 ? idx : 0) % palette.length];
+  }
+
+  function cloneSpec(spec) {
+    if (!spec) return null;
+    return JSON.parse(JSON.stringify(spec));
+  }
+
+  function applyStyleToSpec(spec, rawStyle = {}) {
+    if (!spec || !Array.isArray(spec.traces)) return spec;
+    const style = normalizeStyleOptions(rawStyle);
+    const paletteColors = getPaletteColors(style.palette);
+    const widthRatio = style.lineWidth / 2.2;
+    const sizeRatio = style.pointSize / 7;
+    const out = cloneSpec(spec);
+
+    const dataScatterCount = out.traces.filter(
+      (tr) => tr.type === "scatter" && tr.hoverinfo !== "skip" && !String(tr.name || "").startsWith("Est. ") && !String(tr.name || "").includes(" fit (")
+    ).length;
+    const isSingleCurve = dataScatterCount === 1 || out.key === "dose" || out.key === "vibrio_inhibition";
+    const barTraces = out.traces.filter((tr) => tr.type === "bar");
+    let barIdx = 0;
+    let scatterIdx = 0;
+
+    out.traces = out.traces.map((tr) => {
+      const name = String(tr.name || "");
+      if (tr.hoverinfo === "skip" && name === "Highlighted") return tr;
+
+      const isFit = name.includes(" fit (") || name.startsWith("OLS Fit:");
+      const isEst = name.startsWith("Est. ") || name.startsWith("Probit EC50");
+      const concKey = tr.meta && tr.meta.conc !== undefined ? String(tr.meta.conc) : null;
+      const customSeriesColor =
+        (name && style.seriesColors[name]) ||
+        (concKey && style.seriesColors[concKey]) ||
+        null;
+
+      if (tr.type === "bar") {
+        const bColor =
+          customSeriesColor ||
+          (barTraces.length === 1 && style.primaryColor ? style.primaryColor : null) ||
+          (style.palette !== "default" ? paletteColors[barIdx % paletteColors.length] : null);
+        if (bColor) {
+          tr.marker = { ...(tr.marker || {}), color: bColor };
+        }
+        barIdx++;
+        return tr;
+      }
+
+      if (tr.type !== "scatter") return tr;
+
+      let resolvedColor = customSeriesColor;
+      if (!resolvedColor && !isEst && !isFit) {
+        if (isSingleCurve && style.primaryColor) {
+          resolvedColor = style.primaryColor;
+        } else if (style.palette !== "default") {
+          resolvedColor = paletteColors[scatterIdx % paletteColors.length];
+        }
+      }
+      if (!isEst && !isFit) scatterIdx++;
+
+      if (resolvedColor) {
+        tr.line = { ...(tr.line || {}), color: resolvedColor };
+        if (tr.marker && !Array.isArray(tr.marker.color)) {
+          tr.marker = { ...tr.marker, color: resolvedColor };
+        } else if (tr.marker && Array.isArray(tr.marker.color) && (isSingleCurve || customSeriesColor || style.palette !== "default")) {
+          tr.marker = { ...tr.marker, color: tr.marker.color.map(() => resolvedColor) };
+        }
+      }
+
+      if (!isEst) {
+        const hasLines = String(tr.mode || "").includes("lines");
+        if (hasLines) {
+          if (style.lineStyle === "none" && !isFit) {
+            tr.mode = "markers";
+          } else {
+            const baseW = Number(tr.line?.width) || 2.2;
+            const dashVal = isFit && style.lineStyle === "solid" ? tr.line?.dash || "dot" : style.lineStyle === "none" ? "dot" : style.lineStyle;
+            tr.line = {
+              ...(tr.line || {}),
+              dash: dashVal,
+              width: Math.max(0.5, Number((baseW * widthRatio).toFixed(2))),
+            };
+          }
+        }
+      }
+
+      if (!isFit && !isEst && tr.marker) {
+        if (style.pointStyle === "none") {
+          if (String(tr.mode || "").includes("lines")) {
+            tr.mode = "lines";
+          }
+        } else {
+          if (String(tr.mode || "") === "lines" && style.lineStyle !== "none" && style.pointStyle !== "auto") {
+            tr.mode = "lines+markers";
+          }
+          if (style.pointStyle !== "auto") {
+            tr.marker = {
+              ...tr.marker,
+              symbol: Array.isArray(tr.marker.symbol) ? tr.marker.symbol.map(() => style.pointStyle) : style.pointStyle,
+            };
+          }
+          if (Math.abs(sizeRatio - 1) > 0.01) {
+            if (Array.isArray(tr.marker.size)) {
+              tr.marker = { ...tr.marker, size: tr.marker.size.map((sz) => Math.max(2, Number((sz * sizeRatio).toFixed(1)))) };
+            } else {
+              const baseSz = Number(tr.marker.size) || 7;
+              tr.marker = { ...tr.marker, size: Math.max(2, Number((baseSz * sizeRatio).toFixed(1))) };
+            }
+          }
+        }
+      }
+
+      return tr;
+    });
+
+    return out;
+  }
+
+  function renderChartInto(containerId, spec, filePrefix, style = {}) {
+    const el = preparePlotEl(containerId);
+    if (!el || !spec) return null;
+    const rawSpec = cloneSpec(spec);
+    const styledSpec = applyStyleToSpec(rawSpec, style);
+    renderedSpecs.set(containerId, {
+      containerId,
+      rawSpec,
+      spec: styledSpec,
+      filePrefix,
+      style: normalizeStyleOptions(style),
+    });
+    if (global.Plotly) {
+      global.Plotly.react(el, styledSpec.traces, styledSpec.layout, plotConfig(filePrefix));
+    }
+    return styledSpec;
+  }
+
+  function getRenderedSpec(containerId) {
+    return renderedSpecs.get(containerId) || null;
   }
 
   function getThemeTokens(forceLight = false) {
@@ -159,6 +361,8 @@
       icTarget: Number.isFinite(Number(opts.icTarget)) ? Number(opts.icTarget) : 50,
       tStartHours: opts.tStartHours !== null && opts.tStartHours !== undefined && opts.tStartHours !== "" ? Number(opts.tStartHours) : null,
       tEndHours: opts.tEndHours !== null && opts.tEndHours !== undefined && opts.tEndHours !== "" ? Number(opts.tEndHours) : null,
+      style: normalizeStyleOptions(opts.style),
+      perChartStyles: opts.perChartStyles && typeof opts.perChartStyles === "object" ? opts.perChartStyles : {},
     };
   }
 
@@ -205,7 +409,8 @@
   }
 
   function seriesVisualStyle(conc, allConcs, view, defaultSymbol = "circle") {
-    const color = getConcColor(conc, allConcs);
+    const stOpts = view.style || DEFAULT_CHART_STYLE;
+    const color = getConcColor(conc, allConcs, stOpts.palette, stOpts.seriesColors);
     const isCtrl = view.controlConc !== null && Number(conc) === view.controlConc;
     const hasHighlight = view.highlighted.size > 0;
     const isHighlighted = hasHighlight && view.highlighted.has(Number(conc));
@@ -281,7 +486,7 @@
       const xs = rows.map((r) => `${r.concentration} ${concUnit}${Number(r.concentration) === view.controlConc ? " ★" : ""}`);
       const ys = rows.map((r) => r.meanVal);
       const errs = rows.map((r) => r.stdVal);
-      const colors = rows.map((r) => getConcColor(r.concentration, allConcs));
+      const colors = rows.map((r) => getConcColor(r.concentration, allConcs, view.style.palette, view.style.seriesColors));
       const opacities = rows.map((r) => {
         if (view.highlighted.size === 0 || view.filterMode === "isolate") return 0.92;
         return view.highlighted.has(Number(r.concentration)) ? 1.0 : 0.22;
@@ -328,6 +533,7 @@
         return {
           type: "scatter",
           mode: "lines+markers",
+          meta: { conc: Number(conc) },
           name: `${conc} ${concUnit}${st.isCtrl ? " ★ Ctrl" : ""}`,
           x: grp.map((r) => r.elapsedHours),
           y: grp.map((r) => r.meanVal),
@@ -359,6 +565,7 @@
       return {
         type: "scatter",
         mode: "lines+markers",
+        meta: { conc: Number(conc) },
         name: `${conc} ${concUnit}${st.isCtrl ? " ★ Ctrl" : ""}`,
         x: valid.map((r) => r.elapsedHours),
         y: valid.map((r) => r.lnMeanVal),
@@ -419,6 +626,7 @@
         return {
           type: "scatter",
           mode: "lines+markers",
+          meta: { conc: Number(conc) },
           name: `${conc} ${concUnit}${st.isCtrl ? " ★ Ctrl" : ""}`,
           x: valid.map((r) => r.elapsedHours),
           y: valid.map((r) => r.intervalMu),
@@ -445,7 +653,7 @@
     if (doseValid.length > 0) {
       const targetPct = view.icTarget;
       const pointColors = doseValid.map((r) => {
-        if (view.highlighted.has(Number(r.concentration))) return getConcColor(r.concentration, allConcs);
+        if (view.highlighted.has(Number(r.concentration))) return getConcColor(r.concentration, allConcs, view.style.palette, view.style.seriesColors);
         if (r.isControl) return t.teal;
         return t.crimson;
       });
@@ -490,8 +698,8 @@
           marker: {
             size: 19,
             symbol: "circle-open",
-            color: hlPoints.map((r) => getConcColor(r.concentration, allConcs)),
-            line: { width: 2.6, color: hlPoints.map((r) => getConcColor(r.concentration, allConcs)) },
+            color: hlPoints.map((r) => getConcColor(r.concentration, allConcs, view.style.palette, view.style.seriesColors)),
+            line: { width: 2.6, color: hlPoints.map((r) => getConcColor(r.concentration, allConcs, view.style.palette, view.style.seriesColors)) },
           },
           hoverinfo: "skip",
         });
@@ -570,37 +778,37 @@
     }
 
     const specs = buildTimeSeriesSpecs(config, false);
+    const view = normalizeViewOptions(config.viewOptions);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
 
-    const growthEl = preparePlotEl(ids.growth);
-    if (growthEl && specs.growth) {
+    if (specs.growth) {
       const suffix = timepointsCount === 1 ? "snapshot" : "growth";
-      global.Plotly.react(growthEl, specs.growth.traces, specs.growth.layout, plotConfig(`${filePrefix}_${suffix}`));
+      renderChartInto(ids.growth, specs.growth, `${filePrefix}_${suffix}`, styleFor(ids.growth));
     }
 
     if (timepointsCount < 2) {
+      renderedSpecs.delete(ids.semilog);
+      renderedSpecs.delete(ids.mu);
+      renderedSpecs.delete(ids.dose);
       showEmpty(ids.semilog, "Waiting for 2nd timepoint", "Add another timestamp to inspect exponential phase linearity ln(Y) vs. time.");
       showEmpty(ids.mu, "Waiting for 2nd timepoint", "At least 2 timepoints are needed to compute interval μ (h⁻¹).");
       showEmpty(ids.dose, "Waiting for 2nd timepoint", "Dose-response inhibition (%) requires growth rate μ across ≥ 2 timepoints.");
       return;
     }
 
-    const semiEl = preparePlotEl(ids.semilog);
-    if (semiEl && specs.semilog) {
-      global.Plotly.react(semiEl, specs.semilog.traces, specs.semilog.layout, plotConfig(`${filePrefix}_semilog`));
+    if (specs.semilog) {
+      renderChartInto(ids.semilog, specs.semilog, `${filePrefix}_semilog`, styleFor(ids.semilog));
     }
 
-    const muEl = preparePlotEl(ids.mu);
-    if (muEl && specs.mu) {
-      global.Plotly.react(muEl, specs.mu.traces, specs.mu.layout, plotConfig(`${filePrefix}_interval_mu`));
+    if (specs.mu) {
+      renderChartInto(ids.mu, specs.mu, `${filePrefix}_interval_mu`, styleFor(ids.mu));
     }
 
     if (!specs.dose) {
+      renderedSpecs.delete(ids.dose);
       showEmpty(ids.dose, "Control μ unavailable", "Ensure the selected Control concentration has ≥ 2 timepoints and μ ≠ 0.");
     } else {
-      const doseEl = preparePlotEl(ids.dose);
-      if (doseEl) {
-        global.Plotly.react(doseEl, specs.dose.traces, specs.dose.layout, plotConfig(`${filePrefix}_dose_response`));
-      }
+      renderChartInto(ids.dose, specs.dose, `${filePrefix}_dose_response`, styleFor(ids.dose));
     }
   }
 
@@ -671,7 +879,7 @@
           x: labels,
           y: visibleRows.map((r) => r.mu),
           marker: {
-            color: visibleRows.map((r) => getConcColor(r.dilution, allConcs)),
+            color: visibleRows.map((r) => getConcColor(r.dilution, allConcs, view.style.palette, view.style.seriesColors)),
             opacity: barOpacity,
             line: { color: t.text, width: barLineWidth },
           },
@@ -688,7 +896,7 @@
     if (validInh.length > 0) {
       const targetPct = view.icTarget;
       const pointColors = validInh.map((r) => {
-        if (view.highlighted.has(Number(r.dilution))) return getConcColor(r.dilution, allConcs);
+        if (view.highlighted.has(Number(r.dilution))) return getConcColor(r.dilution, allConcs, view.style.palette, view.style.seriesColors);
         if (r.isControl) return t.teal;
         return t.crimson;
       });
@@ -719,8 +927,8 @@
           marker: {
             size: 19,
             symbol: "circle-open",
-            color: hlPoints.map((r) => getConcColor(r.dilution, allConcs)),
-            line: { width: 2.6, color: hlPoints.map((r) => getConcColor(r.dilution, allConcs)) },
+            color: hlPoints.map((r) => getConcColor(r.dilution, allConcs, view.style.palette, view.style.seriesColors)),
+            line: { width: 2.6, color: hlPoints.map((r) => getConcColor(r.dilution, allConcs, view.style.palette, view.style.seriesColors)) },
           },
           hoverinfo: "skip",
         });
@@ -794,31 +1002,27 @@
     }
 
     const specs = buildLemnaSpecs(analysis, concUnit, false, viewOptions);
+    const view = normalizeViewOptions(viewOptions);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
 
-    const frondsEl = preparePlotEl("lemna-chart-fronds");
-    if (frondsEl && specs.fronds) {
-      global.Plotly.react(frondsEl, specs.fronds.traces, specs.fronds.layout, plotConfig("lemna_fronds"));
+    if (specs.fronds) {
+      renderChartInto("lemna-chart-fronds", specs.fronds, "lemna_fronds", styleFor("lemna-chart-fronds"));
     }
-
-    const muEl = preparePlotEl("lemna-chart-mu");
-    if (muEl && specs.mu) {
-      global.Plotly.react(muEl, specs.mu.traces, specs.mu.layout, plotConfig("lemna_mu"));
+    if (specs.mu) {
+      renderChartInto("lemna-chart-mu", specs.mu, "lemna_mu", styleFor("lemna-chart-mu"));
     }
-
     if (!specs.dose) {
+      renderedSpecs.delete("lemna-chart-dose");
       showEmpty("lemna-chart-dose", "Control sample missing", "Add a control sample (matching Control Concentration) to compute Hemmung (%).");
     } else {
-      const doseEl = preparePlotEl("lemna-chart-dose");
-      if (doseEl) {
-        global.Plotly.react(doseEl, specs.dose.traces, specs.dose.layout, plotConfig("lemna_dose_response"));
-      }
+      renderChartInto("lemna-chart-dose", specs.dose, "lemna_dose_response", styleFor("lemna-chart-dose"));
     }
   }
 
   /**
    * Builds Plotly spec for the Dilution Series stacked bar chart.
    */
-  function buildDilutionSpec(dilutions, concUnit, forceLight = false) {
+  function buildDilutionSpec(dilutions, concUnit, forceLight = false, viewOptions = {}) {
     if (!dilutions || dilutions.length === 0) return null;
     const t = getThemeTokens(forceLight);
     const sorted = [...dilutions].sort((a, b) => Number(a.concentration) - Number(b.concentration));
@@ -857,16 +1061,18 @@
   /**
    * Renders stacked volume bar chart for the Dilution Series helper tab.
    */
-  function renderDilutionChart(dilutions, concUnit) {
+  function renderDilutionChart(dilutions, concUnit, viewOptions = {}) {
     if (!dilutions || dilutions.length === 0) {
+      renderedSpecs.delete("dilution-chart-bars");
       showEmpty("dilution-chart-bars", "No dilution steps yet", "Add rows or generate a dilution series on the left.");
       return;
     }
 
-    const spec = buildDilutionSpec(dilutions, concUnit, false);
-    const el = preparePlotEl("dilution-chart-bars");
-    if (el && spec) {
-      global.Plotly.react(el, spec.traces, spec.layout, plotConfig("dilution_series"));
+    const spec = buildDilutionSpec(dilutions, concUnit, false, viewOptions);
+    const view = normalizeViewOptions(viewOptions);
+    const style = mergeStyleOptions(view.style, view.perChartStyles["dilution-chart-bars"]);
+    if (spec) {
+      renderChartInto("dilution-chart-bars", spec, "dilution_series", style);
     }
   }
 
@@ -878,10 +1084,12 @@
     const { rows, timepoint, targetPct, probit, primaryEC } = analysis;
     if (!rows || rows.length === 0) return {};
 
+    const styleNorm = normalizeStyleOptions(viewOptions.style);
     const view = {
       highlightConcs: Array.isArray(viewOptions.highlightConcs) ? viewOptions.highlightConcs.map(Number) : [],
       isolate: Boolean(viewOptions.isolate),
       logX: Boolean(viewOptions.logX),
+      style: styleNorm,
     };
     const hasHighlight = view.highlightConcs.length > 0;
     const isSelected = (c) => view.highlightConcs.includes(Number(c));
@@ -1018,7 +1226,7 @@
           customdata: probitPts.map((r) => [r.concentration, r.activePct]),
           marker: {
             size: probitPts.map((r) => (hasHighlight && isSelected(r.concentration) ? 13 : 9)),
-            color: probitPts.map((r) => (hasHighlight && !isSelected(r.concentration) ? t.muted : getConcColor(r.concentration, sortedConcs))),
+            color: probitPts.map((r) => (hasHighlight && !isSelected(r.concentration) ? t.muted : getConcColor(r.concentration, sortedConcs, styleNorm.palette, styleNorm.seriesColors))),
             line: { width: 1.5, color: t.plotBg },
           },
           hovertemplate: `<b>%{customdata[0]} ${concUnit}</b><br>ln(C) = %{x:.3f}<br>Probit Y = %{y:.3f} (%{customdata[1]:.1f}%)<extra></extra>`,
@@ -1158,24 +1366,22 @@
     }
 
     const specs = buildDaphniaSpecs(analysis, concUnit, false, viewOptions);
+    const view = normalizeViewOptions(viewOptions);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
 
-    const doseEl = preparePlotEl("daphnia-chart-dose");
-    if (doseEl && specs.dose) {
-      global.Plotly.react(doseEl, specs.dose.traces, specs.dose.layout, plotConfig("daphnia_dose_response"));
+    if (specs.dose) {
+      renderChartInto("daphnia-chart-dose", specs.dose, "daphnia_dose_response", styleFor("daphnia-chart-dose"));
     }
 
     if (!specs.probit) {
+      renderedSpecs.delete("daphnia-chart-probit");
       showEmpty("daphnia-chart-probit", "No intermediate mortality (0% < p < 100%)", "Probit transformation requires partial responses between 0% and 100%. Use Geometric Mean √(a·b) when responses jump from 0% to 100%.");
     } else {
-      const probitEl = preparePlotEl("daphnia-chart-probit");
-      if (probitEl) {
-        global.Plotly.react(probitEl, specs.probit.traces, specs.probit.layout, plotConfig("daphnia_probit"));
-      }
+      renderChartInto("daphnia-chart-probit", specs.probit, "daphnia_probit", styleFor("daphnia-chart-probit"));
     }
 
-    const mobEl = preparePlotEl("daphnia-chart-mobility");
-    if (mobEl && specs.mobility) {
-      global.Plotly.react(mobEl, specs.mobility.traces, specs.mobility.layout, plotConfig("daphnia_mobility"));
+    if (specs.mobility) {
+      renderChartInto("daphnia-chart-mobility", specs.mobility, "daphnia_mobility", styleFor("daphnia-chart-mobility"));
     }
   }
 
@@ -1349,19 +1555,18 @@
     }
 
     const specs = buildVibrioSpecs(analysis, concUnit, false, viewOptions);
+    const view = normalizeViewOptions(viewOptions);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
 
     if (!specs.inhibition) {
+      renderedSpecs.delete("vibrio-chart-inhibition");
       showEmpty("vibrio-chart-inhibition", "2% NaCl Control missing", "Add at least one Control row (2% NaCl) with I₀ and It so correction factor fkt can be computed.");
     } else {
-      const inhEl = preparePlotEl("vibrio-chart-inhibition");
-      if (inhEl) {
-        global.Plotly.react(inhEl, specs.inhibition.traces, specs.inhibition.layout, plotConfig("vibrio_inhibition"));
-      }
+      renderChartInto("vibrio-chart-inhibition", specs.inhibition, "vibrio_inhibition", styleFor("vibrio-chart-inhibition"));
     }
 
-    const lumEl = preparePlotEl("vibrio-chart-luminescence");
-    if (lumEl && specs.luminescence) {
-      global.Plotly.react(lumEl, specs.luminescence.traces, specs.luminescence.layout, plotConfig("vibrio_luminescence"));
+    if (specs.luminescence) {
+      renderChartInto("vibrio-chart-luminescence", specs.luminescence, "vibrio_luminescence", styleFor("vibrio-chart-luminescence"));
     }
   }
 
@@ -1405,8 +1610,15 @@
   }
 
   Ecotox.Charts = {
+    PALETTES,
     SERIES_COLORS,
+    DEFAULT_CHART_STYLE,
+    normalizeStyleOptions,
+    mergeStyleOptions,
+    getPaletteColors,
     getConcColor,
+    applyStyleToSpec,
+    getRenderedSpec,
     buildTimeSeriesSpecs,
     buildLemnaSpecs,
     buildDilutionSpec,

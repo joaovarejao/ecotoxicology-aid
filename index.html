@@ -9,6 +9,7 @@
   <script src="js/math.js" defer></script>
   <script src="js/storage.js" defer></script>
   <script src="js/charts.js" defer></script>
+  <script src="js/matplotlib.js" defer></script>
   <script src="js/exporter.js" defer></script>
   <script src="js/docs.js" defer></script>
   <script src="js/app.js" defer></script>
@@ -203,6 +204,7 @@
               <button type="button" class="toggle-pill" id="od-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
+          <div class="chart-style-bar" data-style-tab="od"></div>
         </div>
 
         <div class="kpi-grid" id="od-kpis">
@@ -394,6 +396,7 @@
               <button type="button" class="toggle-pill" id="cc-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
+          <div class="chart-style-bar" data-style-tab="cc"></div>
         </div>
 
         <div class="kpi-grid">
@@ -567,6 +570,7 @@
               <button type="button" class="toggle-pill" id="lemna-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
+          <div class="chart-style-bar" data-style-tab="lemna"></div>
         </div>
 
         <div class="kpi-grid">
@@ -706,6 +710,7 @@
               <button type="button" class="toggle-pill" id="daphnia-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
+          <div class="chart-style-bar" data-style-tab="daphnia"></div>
         </div>
 
         <div class="kpi-grid">
@@ -852,6 +857,7 @@
               <button type="button" class="toggle-pill" id="vibrio-toggle-logx" aria-pressed="false" title="Switch X-axis to log10 scale">Log X</button>
             </div>
           </div>
+          <div class="chart-style-bar" data-style-tab="vibrio"></div>
         </div>
 
         <div class="kpi-grid">
@@ -987,6 +993,7 @@
           </div>
           <div class="table-scroll" id="dil-table-container"></div>
           <div id="dilution-chart-wrap" class="dil-chart-collapse" hidden>
+            <div class="chart-style-bar chart-style-bar-inline" data-style-tab="dilutions"></div>
             <div class="chart-card" style="margin-top:10px; border:none; box-shadow:none; padding:0;">
               <div id="dilution-chart-bars" class="chart-box"></div>
             </div>
@@ -1134,6 +1141,174 @@
           <button type="submit" class="btn btn-primary">Save Batch Measurements</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: GRAPH STYLE & MATPLOTLIB STUDIO ================= -->
+  <div class="modal-backdrop" id="chart-studio-modal" role="dialog" aria-modal="true" aria-labelledby="chart-studio-title">
+    <div class="modal modal-xl">
+      <div class="modal-header">
+        <div class="studio-title-wrap">
+          <h2 class="modal-title" id="chart-studio-title">Graph Style &amp; Matplotlib Studio</h2>
+          <span class="form-hint" id="chart-studio-chart-id"></span>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" data-close-modal="chart-studio-modal">✕</button>
+      </div>
+      <div class="modal-body studio-body">
+        <div class="studio-layout">
+          <div class="studio-controls">
+            <div class="studio-group">
+              <div class="studio-group-title">Appearance (Color, Line, Width &amp; Point)</div>
+              <div class="studio-grid">
+                <label class="studio-field">
+                  <span>Color Palette</span>
+                  <select id="studio-palette" class="input input-sm">
+                    <option value="default">Lab Default</option>
+                    <option value="tab10">Matplotlib (tab10)</option>
+                    <option value="okabe">Okabe-Ito (Colorblind Safe)</option>
+                    <option value="viridis">Viridis</option>
+                    <option value="plasma">Plasma</option>
+                    <option value="ocean">Ocean Teal-Blue</option>
+                    <option value="mono">Monochrome (Print)</option>
+                  </select>
+                </label>
+                <label class="studio-field">
+                  <span>Line Style</span>
+                  <select id="studio-line-style" class="input input-sm">
+                    <option value="solid">Solid (———)</option>
+                    <option value="dash">Dashed (— —)</option>
+                    <option value="dot">Dotted (····)</option>
+                    <option value="dashdot">Dash-Dot (—·—)</option>
+                    <option value="none">None (Markers only)</option>
+                  </select>
+                </label>
+                <label class="studio-field">
+                  <span>Line Width <strong id="studio-line-width-val" class="mono">2.2 px</strong></span>
+                  <input type="range" id="studio-line-width" min="0.5" max="6" step="0.3" value="2.2" />
+                </label>
+                <label class="studio-field">
+                  <span>Point / Marker Style</span>
+                  <select id="studio-point-style" class="input input-sm">
+                    <option value="auto">Auto (by assay)</option>
+                    <option value="circle">Circle (●)</option>
+                    <option value="square">Square (■)</option>
+                    <option value="diamond">Diamond (◆)</option>
+                    <option value="triangle-up">Triangle Up (▲)</option>
+                    <option value="triangle-down">Triangle Down (▼)</option>
+                    <option value="cross">Cross (+)</option>
+                    <option value="x">X (✕)</option>
+                    <option value="star">Star (★)</option>
+                    <option value="circle-open">Open Circle (○)</option>
+                    <option value="none">None (Lines only)</option>
+                  </select>
+                </label>
+                <label class="studio-field">
+                  <span>Point Size <strong id="studio-point-size-val" class="mono">7 px</strong></span>
+                  <input type="range" id="studio-point-size" min="3" max="16" step="1" value="7" />
+                </label>
+                <div class="studio-field">
+                  <span>Primary / Single-Curve Color</span>
+                  <div class="studio-color-row">
+                    <input type="color" id="studio-primary-color" value="#0d9488" />
+                    <span id="studio-primary-color-hex" class="mono form-hint">Auto</span>
+                    <button type="button" id="btn-studio-clear-primary" class="btn btn-xs btn-ghost">Auto</button>
+                  </div>
+                </div>
+              </div>
+              <div id="studio-series-colors-wrap" class="studio-series-wrap">
+                <div class="studio-sub-label">Per-Series / Concentration Colors</div>
+                <div id="studio-series-colors" class="series-color-grid"></div>
+              </div>
+            </div>
+
+            <div class="studio-group">
+              <div class="studio-group-title">Matplotlib Publication Format</div>
+              <div class="studio-grid">
+                <label class="studio-field">
+                  <span>Matplotlib Theme</span>
+                  <select id="studio-mpl-theme" class="input input-sm">
+                    <option value="classic">Classic (Boxed Spines, Ticks In)</option>
+                    <option value="seaborn">Seaborn-style (Grey Grid)</option>
+                    <option value="minimal">Minimal (Open Top &amp; Right)</option>
+                  </select>
+                </label>
+                <label class="studio-field">
+                  <span>Figure Size (inches)</span>
+                  <select id="studio-mpl-figsize" class="input input-sm">
+                    <option value="6.5x4.2">6.5 × 4.2 in (Paper Single)</option>
+                    <option value="8x5" selected>8.0 × 5.0 in (Standard)</option>
+                    <option value="10x5.5">10.0 × 5.5 in (Wide)</option>
+                  </select>
+                </label>
+                <label class="studio-field">
+                  <span>Export Resolution</span>
+                  <select id="studio-mpl-dpi" class="input input-sm">
+                    <option value="150">150 DPI (Draft)</option>
+                    <option value="300" selected>300 DPI (Publication)</option>
+                    <option value="600">600 DPI (High-Res Print)</option>
+                  </select>
+                </label>
+                <label class="studio-field">
+                  <span>Legend Position</span>
+                  <select id="studio-mpl-legend" class="input input-sm">
+                    <option value="best">Auto / Best</option>
+                    <option value="below">Below Plot</option>
+                    <option value="upper_right">Upper Right</option>
+                    <option value="upper_left">Upper Left</option>
+                  </select>
+                </label>
+                <label class="studio-field full">
+                  <span>Custom Plot Title</span>
+                  <input type="text" id="studio-title-input" class="input input-sm" placeholder="Use chart default title" />
+                </label>
+                <label class="studio-field">
+                  <span>Custom X-Axis Label</span>
+                  <input type="text" id="studio-xlabel-input" class="input input-sm" placeholder="Default X label" />
+                </label>
+                <label class="studio-field">
+                  <span>Custom Y-Axis Label</span>
+                  <input type="text" id="studio-ylabel-input" class="input input-sm" placeholder="Default Y label" />
+                </label>
+              </div>
+              <div class="studio-checks">
+                <label class="studio-check">
+                  <input type="checkbox" id="studio-mpl-grid" checked />
+                  <span>Show Matplotlib Gridlines</span>
+                </label>
+                <label class="studio-check">
+                  <input type="checkbox" id="studio-sync-live" checked />
+                  <span>Apply style to dashboard graph</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="studio-preview">
+            <div class="studio-preview-bar">
+              <div class="segmented segmented-xs" id="studio-preview-tabs">
+                <button type="button" class="active" data-studio-view="preview">Matplotlib Preview</button>
+                <button type="button" data-studio-view="python">Python Script (.py)</button>
+              </div>
+              <button type="button" id="btn-studio-reset" class="btn btn-xs btn-ghost">Reset This Graph</button>
+            </div>
+            <div id="studio-plot-wrap" class="studio-plot-wrap">
+              <div id="studio-plot-preview" class="studio-plot-box"></div>
+            </div>
+            <div id="studio-code-wrap" class="studio-code-wrap" hidden>
+              <pre id="studio-code-preview" class="studio-code-pre"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button type="button" id="btn-studio-save-png" class="btn btn-primary btn-sm">Save Matplotlib PNG</button>
+          <button type="button" id="btn-studio-save-svg" class="btn btn-sm">Save Vector SVG</button>
+          <button type="button" id="btn-studio-save-py" class="btn btn-sm">Download .py Script</button>
+          <button type="button" id="btn-studio-copy-py" class="btn btn-sm btn-ghost">Copy .py</button>
+        </div>
+        <button type="button" class="btn" data-close-modal="chart-studio-modal">Close</button>
+      </div>
     </div>
   </div>
 

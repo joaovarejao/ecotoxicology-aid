@@ -10,6 +10,7 @@
   const M = Ecotox.Math;
   const S = Ecotox.Storage;
   const C = Ecotox.Charts;
+  const MP = Ecotox.Matplotlib;
   const D = Ecotox.Docs;
 
   // ---------- Application State ----------
@@ -36,11 +37,20 @@
     lastDaphniaAnalysis: null,
     lastVibrioAnalysis: null,
     views: {
-      od: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
-      cc: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
-      lemna: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50 },
-      daphnia: { selectedConcs: new Set(), filterMode: "highlight", useAbbott: true, logX: false, targetPct: 50 },
-      vibrio: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, logX: false, targetPct: 50 },
+      od: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50, style: { ...C.DEFAULT_CHART_STYLE } },
+      cc: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50, style: { ...C.DEFAULT_CHART_STYLE } },
+      lemna: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, showFitLines: false, logX: false, icTarget: 50, style: { ...C.DEFAULT_CHART_STYLE } },
+      daphnia: { selectedConcs: new Set(), filterMode: "highlight", useAbbott: true, logX: false, targetPct: 50, style: { ...C.DEFAULT_CHART_STYLE } },
+      vibrio: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, logX: false, targetPct: 50, style: { ...C.DEFAULT_CHART_STYLE } },
+      dilutions: { style: { ...C.DEFAULT_CHART_STYLE } },
+    },
+    perChartStyles: {},
+    studio: {
+      chartId: null,
+      tabKey: null,
+      previewTab: "preview",
+      draftStyle: { ...C.DEFAULT_CHART_STYLE },
+      mplOpts: MP ? { ...MP.DEFAULT_MPL_OPTIONS } : {},
     },
   };
 
@@ -66,7 +76,7 @@
     const hasSel = view.selectedConcs.size > 0;
     const chipsHtml = concs
       .map((c) => {
-        const color = C.getConcColor(c, concs);
+        const color = C.getConcColor(c, concs, view.style?.palette, view.style?.seriesColors);
         const isSel = view.selectedConcs.has(c);
         const isCtrl = Number(c) === Number(controlConc);
         const cls = [
@@ -621,8 +631,11 @@
           icTarget: view.icTarget,
           tStartHours: tStart,
           tEndHours: tEnd,
+          style: view.style,
+          perChartStyles: state.perChartStyles,
         },
       });
+      refreshChartOverrideBadges();
     }
 
     renderOdTable(analysis, unit);
@@ -988,8 +1001,11 @@
           icTarget: view.icTarget,
           tStartHours: tStart,
           tEndHours: tEnd,
+          style: view.style,
+          perChartStyles: state.perChartStyles,
         },
       });
+      refreshChartOverrideBadges();
     }
 
     renderCcTable(analysis, unit);
@@ -1119,7 +1135,10 @@
         showErrorBars: view.showErrorBars,
         logX: view.logX,
         icTarget: view.icTarget,
+        style: view.style,
+        perChartStyles: state.perChartStyles,
       });
+      refreshChartOverrideBadges();
     }
 
     const tbl = $("lemna-table-container");
@@ -1287,7 +1306,10 @@
         highlightConcs: Array.from(view.selectedConcs),
         isolate: view.filterMode === "isolate",
         logX: view.logX,
+        style: view.style,
+        perChartStyles: state.perChartStyles,
       });
+      refreshChartOverrideBadges();
     }
 
     // Table
@@ -1461,7 +1483,10 @@
         isolate: view.filterMode === "isolate",
         logX: view.logX,
         showErrorBars: view.showErrorBars,
+        style: view.style,
+        perChartStyles: state.perChartStyles,
       });
+      refreshChartOverrideBadges();
     }
 
     // Table
@@ -1706,7 +1731,8 @@
     if (state.activeTab === "dilutions") {
       if (state.dilChartOpen) {
         $("dilution-chart-wrap").hidden = false;
-        C.renderDilutionChart(sorted, unit);
+        C.renderDilutionChart(sorted, unit, { style: state.views.dilutions.style, perChartStyles: state.perChartStyles });
+        refreshChartOverrideBadges();
       }
       renderDocsHub();
     }
@@ -1794,11 +1820,268 @@
     resizeChartCardPlot(card);
   }
 
+  function inferTabFromChartId(chartId) {
+    if (!chartId) return "od";
+    if (chartId.startsWith("od-")) return "od";
+    if (chartId.startsWith("cc-")) return "cc";
+    if (chartId.startsWith("lemna-")) return "lemna";
+    if (chartId.startsWith("daphnia-")) return "daphnia";
+    if (chartId.startsWith("vibrio-")) return "vibrio";
+    if (chartId.startsWith("dilution-")) return "dilutions";
+    return "od";
+  }
+
+  function renderTabByKey(tabKey) {
+    if (tabKey === "od") renderOdTab();
+    else if (tabKey === "cc") renderCellCountTab();
+    else if (tabKey === "lemna") renderLemnaTab();
+    else if (tabKey === "daphnia") renderDaphniaTab();
+    else if (tabKey === "vibrio") renderVibrioTab();
+    else if (tabKey === "dilutions") renderDilutionsTab();
+  }
+
+  function refreshChartOverrideBadges() {
+    document.querySelectorAll(".chart-studio-btn[data-studio-chart]").forEach((btn) => {
+      const ov = state.perChartStyles[btn.dataset.studioChart];
+      const hasOv = Boolean(ov && Object.keys(ov).length > 0);
+      btn.classList.toggle("has-override", hasOv);
+      btn.textContent = hasOv ? "⚙ Style ★ / Matplotlib" : "⚙ Style / Matplotlib";
+    });
+  }
+
+  function initChartStyleBars() {
+    const paletteOpts = Object.entries(C.PALETTES)
+      .map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(v.label)}</option>`)
+      .join("");
+
+    document.querySelectorAll(".chart-style-bar[data-style-tab]").forEach((bar) => {
+      const tabKey = bar.dataset.styleTab;
+      bar.innerHTML = `
+        <span class="manip-label">Graph Style</span>
+        <label class="style-control" title="Color palette for all plots in this tab">
+          Palette
+          <select data-style-field="palette">${paletteOpts}</select>
+        </label>
+        <label class="style-control" title="Accent color for single-curve plots (Dose-Response / Probit / Bar)">
+          Color
+          <input type="color" data-style-field="primaryColor" value="#0d9488" />
+        </label>
+        <label class="style-control" title="Line dash pattern">
+          Line
+          <select data-style-field="lineStyle">
+            <option value="solid">Solid</option>
+            <option value="dash">Dashed</option>
+            <option value="dot">Dotted</option>
+            <option value="dashdot">Dash-Dot</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label class="style-control" title="Line stroke thickness">
+          Width
+          <input type="range" min="0.5" max="6" step="0.3" value="2.2" data-style-field="lineWidth" />
+          <span class="style-val-badge" data-style-badge="lineWidth">2.2</span>
+        </label>
+        <label class="style-control" title="Point / marker symbol">
+          Point
+          <select data-style-field="pointStyle">
+            <option value="auto">Auto</option>
+            <option value="circle">Circle ●</option>
+            <option value="square">Square ■</option>
+            <option value="diamond">Diamond ◆</option>
+            <option value="triangle-up">Triangle ▲</option>
+            <option value="triangle-down">Triangle ▼</option>
+            <option value="cross">Cross +</option>
+            <option value="x">X ✕</option>
+            <option value="star">Star ★</option>
+            <option value="circle-open">Open ○</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label class="style-control" title="Marker point size">
+          Size
+          <input type="range" min="3" max="16" step="1" value="7" data-style-field="pointSize" />
+          <span class="style-val-badge" data-style-badge="pointSize">7</span>
+        </label>
+        <button type="button" class="btn btn-xs btn-ghost" data-style-reset="1" title="Reset style options for this tab">Reset</button>
+      `;
+      syncStyleBarUI(tabKey);
+    });
+  }
+
+  function syncStyleBarUI(tabKey) {
+    const bar = document.querySelector(`.chart-style-bar[data-style-tab="${tabKey}"]`);
+    const style = state.views[tabKey]?.style;
+    if (!bar || !style) return;
+    const setVal = (sel, val) => {
+      const el = bar.querySelector(sel);
+      if (el) el.value = val;
+    };
+    setVal('[data-style-field="palette"]', style.palette || "default");
+    setVal('[data-style-field="primaryColor"]', style.primaryColor || "#0d9488");
+    setVal('[data-style-field="lineStyle"]', style.lineStyle || "solid");
+    setVal('[data-style-field="lineWidth"]', String(style.lineWidth ?? 2.2));
+    setVal('[data-style-field="pointStyle"]', style.pointStyle || "auto");
+    setVal('[data-style-field="pointSize"]', String(style.pointSize ?? 7));
+    const lwBadge = bar.querySelector('[data-style-badge="lineWidth"]');
+    if (lwBadge) lwBadge.textContent = Number(style.lineWidth ?? 2.2).toFixed(1);
+    const psBadge = bar.querySelector('[data-style-badge="pointSize"]');
+    if (psBadge) psBadge.textContent = String(style.pointSize ?? 7);
+  }
+
+  function getTraceDisplayColor(tr, idx, paletteKey) {
+    const pal = C.getPaletteColors(paletteKey);
+    const c = tr.line?.color || (Array.isArray(tr.marker?.color) ? tr.marker.color[0] : tr.marker?.color);
+    if (typeof c === "string" && c.startsWith("#")) return c;
+    return pal[idx % pal.length];
+  }
+
+  function populateStudioSeriesPickers(rawSpec, effectiveStyle) {
+    const container = $("studio-series-colors");
+    const wrap = $("studio-series-colors-wrap");
+    if (!container || !wrap || !rawSpec) return;
+
+    const dataTraces = (rawSpec.traces || []).filter((tr) => {
+      const name = String(tr.name || "");
+      if (tr.hoverinfo === "skip" && name === "Highlighted") return false;
+      if (name.includes(" fit (") || name.startsWith("OLS Fit:")) return false;
+      if (name.startsWith("Est. ") || name.startsWith("Probit EC50")) return false;
+      return tr.type === "scatter" || tr.type === "bar";
+    });
+
+    if (dataTraces.length === 0) {
+      wrap.hidden = true;
+      container.innerHTML = "";
+      return;
+    }
+
+    wrap.hidden = false;
+    container.innerHTML = dataTraces
+      .map((tr, idx) => {
+        const name = String(tr.name || `Series ${idx + 1}`);
+        const key = name;
+        const concKey = tr.meta && tr.meta.conc !== undefined ? String(tr.meta.conc) : null;
+        const curColor =
+          effectiveStyle.seriesColors?.[key] ||
+          (concKey && effectiveStyle.seriesColors?.[concKey]) ||
+          getTraceDisplayColor(tr, idx, effectiveStyle.palette);
+        const safeHex = /^#[0-9a-fA-F]{6}$/.test(curColor) ? curColor : "#0d9488";
+        return `
+          <label class="series-color-item" title="${escapeHtml(name)}">
+            <input type="color" data-series-key="${escapeHtml(key)}" data-conc-key="${escapeHtml(concKey || "")}" value="${safeHex}" />
+            <span>${escapeHtml(name)}</span>
+          </label>
+        `;
+      })
+      .join("");
+  }
+
+  function syncStudioFormFromState(effectiveStyle) {
+    const mpl = state.studio.mplOpts;
+    $("studio-palette").value = effectiveStyle.palette || "default";
+    $("studio-line-style").value = effectiveStyle.lineStyle || "solid";
+    $("studio-line-width").value = String(effectiveStyle.lineWidth ?? 2.2);
+    $("studio-line-width-val").textContent = `${Number(effectiveStyle.lineWidth ?? 2.2).toFixed(1)} px`;
+    $("studio-point-style").value = effectiveStyle.pointStyle || "auto";
+    $("studio-point-size").value = String(effectiveStyle.pointSize ?? 7);
+    $("studio-point-size-val").textContent = `${effectiveStyle.pointSize ?? 7} px`;
+
+    if (effectiveStyle.primaryColor) {
+      $("studio-primary-color").value = effectiveStyle.primaryColor;
+      $("studio-primary-color-hex").textContent = effectiveStyle.primaryColor;
+    } else {
+      $("studio-primary-color").value = "#0d9488";
+      $("studio-primary-color-hex").textContent = "Auto";
+    }
+
+    $("studio-mpl-theme").value = mpl.theme || "classic";
+    $("studio-mpl-figsize").value = mpl.figsize || "8x5";
+    $("studio-mpl-dpi").value = String(mpl.dpi || 300);
+    $("studio-mpl-legend").value = mpl.legendLoc || "best";
+    $("studio-mpl-grid").checked = mpl.showGrid !== false;
+    $("studio-title-input").value = mpl.title || "";
+    $("studio-xlabel-input").value = mpl.xLabel || "";
+    $("studio-ylabel-input").value = mpl.yLabel || "";
+  }
+
+  function renderStudioPreview() {
+    const chartId = state.studio.chartId;
+    if (!chartId || !MP) return;
+    const entry = C.getRenderedSpec(chartId);
+    if (!entry || !entry.rawSpec) return;
+
+    const style = C.normalizeStyleOptions(state.studio.draftStyle);
+    const mplOpts = MP.normalizeMplOptions(state.studio.mplOpts);
+    const previewSpec = MP.buildMatplotlibPreviewSpec(entry.rawSpec, style, mplOpts);
+    const pyCode = MP.generatePythonScript(entry.rawSpec, style, mplOpts, entry.filePrefix || chartId);
+
+    $("studio-code-preview").textContent = pyCode;
+
+    const showPlot = state.studio.previewTab !== "python";
+    $("studio-plot-wrap").hidden = !showPlot;
+    $("studio-code-wrap").hidden = showPlot;
+
+    if (showPlot && previewSpec && global.Plotly) {
+      const plotEl = $("studio-plot-preview");
+      requestAnimationFrame(() => {
+        global.Plotly.react(plotEl, previewSpec.traces, previewSpec.layout, {
+          responsive: true,
+          displaylogo: false,
+        });
+      });
+    }
+  }
+
+  function openChartStudio(chartId) {
+    if (!chartId || !MP) return;
+    const entry = C.getRenderedSpec(chartId);
+    if (!entry || !entry.rawSpec) {
+      toast("No plotted data in this graph yet — add entries first.");
+      return;
+    }
+    const tabKey = inferTabFromChartId(chartId);
+    const baseStyle = state.views[tabKey]?.style || C.DEFAULT_CHART_STYLE;
+    const override = state.perChartStyles[chartId] || {};
+    const effective = C.mergeStyleOptions(baseStyle, override);
+
+    state.studio.chartId = chartId;
+    state.studio.tabKey = tabKey;
+    state.studio.previewTab = "preview";
+    state.studio.draftStyle = effective;
+    state.studio.mplOpts = { ...MP.DEFAULT_MPL_OPTIONS };
+
+    $("chart-studio-title").textContent = entry.rawSpec.title || "Graph Style & Matplotlib Studio";
+    $("chart-studio-chart-id").textContent = `${tabKey.toUpperCase()} · ${chartId}`;
+    $("studio-sync-live").checked = true;
+
+    document.querySelectorAll("#studio-preview-tabs button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.studioView === "preview");
+    });
+
+    syncStudioFormFromState(effective);
+    populateStudioSeriesPickers(entry.rawSpec, effective);
+    openModal("chart-studio-modal");
+    renderStudioPreview();
+  }
+
   function initChartFullsizeButtons() {
     document.querySelectorAll(".chart-card").forEach((card) => {
       if (card.querySelector(".chart-card-bar")) return;
+      const box = card.querySelector(".chart-box");
+      const boxId = box ? box.id : "";
       const bar = document.createElement("div");
       bar.className = "chart-card-bar";
+
+      if (boxId && MP) {
+        const studioBtn = document.createElement("button");
+        studioBtn.type = "button";
+        studioBtn.className = "btn btn-xs btn-ghost chart-studio-btn";
+        studioBtn.dataset.studioChart = boxId;
+        studioBtn.textContent = "⚙ Style / Matplotlib";
+        studioBtn.title = "Customize colors/line/point & open Matplotlib export pop-up";
+        studioBtn.addEventListener("click", () => openChartStudio(boxId));
+        bar.appendChild(studioBtn);
+      }
+
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn btn-xs btn-ghost chart-expand-btn";
@@ -2067,10 +2350,16 @@
           odControlConc: state.odControlConc,
           ccControlConc: state.ccControlConc,
           lemnaControlConc: state.lemnaControlConc,
+          daphniaControlConc: state.daphniaControlConc,
+          daphniaTimepoint: state.daphniaTimepoint,
+          vibrioControlConc: state.vibrioControlConc,
+          vibrioContactMin: state.vibrioContactMin,
           odTStart: $("od-t-start").value,
           odTEnd: $("od-t-end").value,
           ccTStart: $("cc-t-start").value,
           ccTEnd: $("cc-t-end").value,
+          views: state.views,
+          perChartStyles: state.perChartStyles,
         });
         toast(`Exported "${filename}"`);
       } catch (err) {
@@ -3382,7 +3671,8 @@
         const exp = getActiveExp();
         if (exp) {
           const sorted = exp.dilutions.filter((d) => !d.ignored).sort((a, b) => Number(a.concentration) - Number(b.concentration));
-          C.renderDilutionChart(sorted, exp.meta.concUnit || "mg/L");
+          C.renderDilutionChart(sorted, exp.meta.concUnit || "mg/L", { style: state.views.dilutions.style, perChartStyles: state.perChartStyles });
+          refreshChartOverrideBadges();
         }
       }
     });
@@ -3457,6 +3747,215 @@
       renderExperimentHeader();
       target.render();
     });
+
+    // ---------- Tab Graph Style Strips ----------
+    document.querySelectorAll(".chart-style-bar[data-style-tab]").forEach((bar) => {
+      const tabKey = bar.dataset.styleTab;
+      const onStyleChange = (ev) => {
+        const ctrl = ev.target.closest("[data-style-field]");
+        if (!ctrl) return;
+        const field = ctrl.dataset.styleField;
+        const view = state.views[tabKey];
+        if (!view) return;
+        if (!view.style) view.style = { ...C.DEFAULT_CHART_STYLE };
+
+        if (field === "lineWidth" || field === "pointSize") {
+          view.style[field] = Number(ctrl.value);
+          const badge = bar.querySelector(`[data-style-badge="${field}"]`);
+          if (badge) badge.textContent = field === "lineWidth" ? Number(ctrl.value).toFixed(1) : String(ctrl.value);
+        } else if (field === "palette") {
+          view.style.palette = ctrl.value;
+          view.style.primaryColor = "";
+          view.style.seriesColors = {};
+        } else {
+          view.style[field] = ctrl.value;
+        }
+        renderTabByKey(tabKey);
+      };
+
+      bar.addEventListener("input", onStyleChange);
+      bar.addEventListener("change", onStyleChange);
+      bar.addEventListener("click", (ev) => {
+        const resetBtn = ev.target.closest("[data-style-reset]");
+        if (!resetBtn || !state.views[tabKey]) return;
+        state.views[tabKey].style = { ...C.DEFAULT_CHART_STYLE, seriesColors: {} };
+        syncStyleBarUI(tabKey);
+        renderTabByKey(tabKey);
+        toast("Reset tab graph style");
+      });
+    });
+
+    // ---------- Graph Style & Matplotlib Studio Events ----------
+    function applyStudioDraftToLive() {
+      const chartId = state.studio.chartId;
+      const tabKey = state.studio.tabKey;
+      if (!chartId || !tabKey) return;
+      if ($("studio-sync-live").checked) {
+        state.perChartStyles[chartId] = C.normalizeStyleOptions(state.studio.draftStyle);
+        renderTabByKey(tabKey);
+      }
+      renderStudioPreview();
+    }
+
+    const studioFieldMap = [
+      ["studio-palette", "palette", "change"],
+      ["studio-line-style", "lineStyle", "change"],
+      ["studio-point-style", "pointStyle", "change"],
+      ["studio-line-width", "lineWidth", "input"],
+      ["studio-point-size", "pointSize", "input"],
+      ["studio-primary-color", "primaryColor", "input"],
+    ];
+
+    studioFieldMap.forEach(([elId, field, evtName]) => {
+      const el = $(elId);
+      if (!el) return;
+      el.addEventListener(evtName, () => {
+        if (field === "lineWidth") {
+          state.studio.draftStyle.lineWidth = Number(el.value);
+          $("studio-line-width-val").textContent = `${Number(el.value).toFixed(1)} px`;
+        } else if (field === "pointSize") {
+          state.studio.draftStyle.pointSize = Number(el.value);
+          $("studio-point-size-val").textContent = `${el.value} px`;
+        } else if (field === "palette") {
+          state.studio.draftStyle.palette = el.value;
+          state.studio.draftStyle.primaryColor = "";
+          state.studio.draftStyle.seriesColors = {};
+          $("studio-primary-color-hex").textContent = "Auto";
+          const entry = C.getRenderedSpec(state.studio.chartId);
+          if (entry && entry.rawSpec) populateStudioSeriesPickers(entry.rawSpec, state.studio.draftStyle);
+        } else if (field === "primaryColor") {
+          state.studio.draftStyle.primaryColor = el.value;
+          $("studio-primary-color-hex").textContent = el.value;
+        } else {
+          state.studio.draftStyle[field] = el.value;
+        }
+        applyStudioDraftToLive();
+      });
+    });
+
+    $("btn-studio-clear-primary")?.addEventListener("click", () => {
+      state.studio.draftStyle.primaryColor = "";
+      $("studio-primary-color").value = "#0d9488";
+      $("studio-primary-color-hex").textContent = "Auto";
+      applyStudioDraftToLive();
+    });
+
+    $("studio-series-colors")?.addEventListener("input", (ev) => {
+      const picker = ev.target.closest("input[type='color'][data-series-key]");
+      if (!picker) return;
+      if (!state.studio.draftStyle.seriesColors) state.studio.draftStyle.seriesColors = {};
+      state.studio.draftStyle.seriesColors[picker.dataset.seriesKey] = picker.value;
+      if (picker.dataset.concKey) {
+        state.studio.draftStyle.seriesColors[picker.dataset.concKey] = picker.value;
+      }
+      applyStudioDraftToLive();
+    });
+
+    [
+      ["studio-mpl-theme", "theme", "change"],
+      ["studio-mpl-figsize", "figsize", "change"],
+      ["studio-mpl-dpi", "dpi", "change"],
+      ["studio-mpl-legend", "legendLoc", "change"],
+      ["studio-title-input", "title", "input"],
+      ["studio-xlabel-input", "xLabel", "input"],
+      ["studio-ylabel-input", "yLabel", "input"],
+    ].forEach(([elId, key, evtName]) => {
+      const el = $(elId);
+      if (!el) return;
+      el.addEventListener(evtName, () => {
+        state.studio.mplOpts[key] = key === "dpi" ? Number(el.value) : el.value;
+        renderStudioPreview();
+      });
+    });
+
+    $("studio-mpl-grid")?.addEventListener("change", (ev) => {
+      state.studio.mplOpts.showGrid = ev.target.checked;
+      renderStudioPreview();
+    });
+
+    $("studio-sync-live")?.addEventListener("change", () => {
+      if ($("studio-sync-live").checked) applyStudioDraftToLive();
+    });
+
+    $("studio-preview-tabs")?.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-studio-view]");
+      if (!btn) return;
+      state.studio.previewTab = btn.dataset.studioView;
+      $("studio-preview-tabs").querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === btn));
+      renderStudioPreview();
+    });
+
+    $("btn-studio-reset")?.addEventListener("click", () => {
+      const chartId = state.studio.chartId;
+      const tabKey = state.studio.tabKey;
+      if (!chartId || !tabKey) return;
+      delete state.perChartStyles[chartId];
+      const baseStyle = C.normalizeStyleOptions(state.views[tabKey]?.style || C.DEFAULT_CHART_STYLE);
+      state.studio.draftStyle = baseStyle;
+      state.studio.mplOpts = MP ? { ...MP.DEFAULT_MPL_OPTIONS } : {};
+      renderTabByKey(tabKey);
+      const entry = C.getRenderedSpec(chartId);
+      syncStudioFormFromState(baseStyle);
+      if (entry && entry.rawSpec) populateStudioSeriesPickers(entry.rawSpec, baseStyle);
+      renderStudioPreview();
+      toast("Reset graph overrides");
+    });
+
+    $("btn-studio-save-png")?.addEventListener("click", async () => {
+      const entry = C.getRenderedSpec(state.studio.chartId);
+      if (!entry || !entry.rawSpec || !MP) return;
+      const btn = $("btn-studio-save-png");
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Rendering PNG...";
+      try {
+        const fname = await MP.exportMatplotlibImage(entry.rawSpec, state.studio.draftStyle, state.studio.mplOpts, "png", entry.filePrefix || state.studio.chartId);
+        toast(`Saved "${fname}"`);
+      } catch (err) {
+        toast(`PNG export failed: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+
+    $("btn-studio-save-svg")?.addEventListener("click", async () => {
+      const entry = C.getRenderedSpec(state.studio.chartId);
+      if (!entry || !entry.rawSpec || !MP) return;
+      const btn = $("btn-studio-save-svg");
+      const prev = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Rendering SVG...";
+      try {
+        const fname = await MP.exportMatplotlibImage(entry.rawSpec, state.studio.draftStyle, state.studio.mplOpts, "svg", entry.filePrefix || state.studio.chartId);
+        toast(`Saved "${fname}"`);
+      } catch (err) {
+        toast(`SVG export failed: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+
+    $("btn-studio-save-py")?.addEventListener("click", () => {
+      const entry = C.getRenderedSpec(state.studio.chartId);
+      if (!entry || !entry.rawSpec || !MP) return;
+      const pyCode = MP.generatePythonScript(entry.rawSpec, state.studio.draftStyle, state.studio.mplOpts, entry.filePrefix || state.studio.chartId);
+      const filename = `${entry.filePrefix || state.studio.chartId}_matplotlib.py`;
+      S.downloadFile(filename, pyCode, "text/x-python");
+      toast(`Downloaded "${filename}"`);
+    });
+
+    $("btn-studio-copy-py")?.addEventListener("click", async () => {
+      const code = $("studio-code-preview")?.textContent || "";
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        toast("Copied Matplotlib Python script");
+      } catch {
+        toast("Clipboard unavailable — use Download .py Script");
+      }
+    });
   }
 
   // ---------- Bootstrap ----------
@@ -3473,6 +3972,7 @@
     $("cc-date").value = todayIso();
     $("cc-time").value = nowTimeHm();
 
+    initChartStyleBars();
     initChartFullsizeButtons();
     bindEvents();
     updateCellCountModeUI();
