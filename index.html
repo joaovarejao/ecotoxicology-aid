@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ecotoxicology Aid — Lab Kinetics &amp; Assay Suite</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="lib/plotly-basic-2.35.2.min.js" defer></script>
+  <script src="js/math.js" defer></script>
+  <script src="js/storage.js" defer></script>
+  <script src="js/charts.js" defer></script>
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+  <!-- ================= TOP NAVIGATION BAR ================= -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon" aria-hidden="true">μ</div>
+      <div>
+        <div class="brand-title">Ecotoxicology Aid</div>
+        <div class="brand-sub">OD · Cell Count · Lemna · Local Benchtop</div>
+      </div>
+    </div>
+
+    <div class="exp-controls">
+      <div class="exp-select-wrap">
+        <label class="exp-select-label" for="experiment-select">Experiment</label>
+        <select id="experiment-select" class="exp-select" aria-label="Select Experiment"></select>
+      </div>
+      <button type="button" id="btn-new-exp" class="btn btn-primary">+ New</button>
+      <button type="button" id="btn-edit-exp" class="btn" title="Experiment settings, duplicate, or delete">Settings</button>
+    </div>
+
+    <div class="topbar-actions">
+      <button type="button" id="btn-open-save" class="btn btn-sm" title="Open a local experiment or workspace .json save file">Open File</button>
+      <button type="button" id="btn-save-exp" class="btn btn-sm" title="Save active experiment to a local .json file">Save File</button>
+      <button type="button" id="btn-export-json" class="btn btn-sm btn-ghost" title="Export all experiments as workspace JSON">Backup All</button>
+      <input type="file" id="import-file-input" accept=".json,application/json" hidden />
+      <button type="button" id="btn-theme-toggle" class="btn btn-icon" title="Toggle light/dark theme" aria-label="Toggle theme">☀</button>
+    </div>
+  </header>
+
+  <!-- ================= EMPTY WORKSPACE SCREEN ================= -->
+  <section id="empty-workspace-screen" class="empty-workspace" hidden>
+    <div class="empty-workspace-card" id="empty-dropzone">
+      <div class="empty-workspace-icon" aria-hidden="true">μ</div>
+      <h1 class="empty-workspace-title">No Experiment Open</h1>
+      <p class="empty-workspace-desc">
+        Create a new ecotoxicology experiment or open a local <code>.json</code> save file.
+        Your active experiment is saved locally and reopens automatically next time.
+      </p>
+      <div class="empty-workspace-actions">
+        <button type="button" id="btn-empty-new" class="btn btn-primary">+ Create New Experiment</button>
+        <button type="button" id="btn-empty-open" class="btn">Open Save File (.json)</button>
+      </div>
+      <div class="empty-workspace-hint">
+        Tip: You can drag &amp; drop any <code>.json</code> save file anywhere on this window
+        (e.g. <code>saves/bi58_algentest_lemna_2026-11-23.json</code>).
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ASSAY TAB STRIP ================= -->
+  <nav class="tabbar" id="main-tabbar" aria-label="Assay Tabs">
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab-btn active" data-tab="od" role="tab" aria-selected="true">
+        OD Measurements <span class="tab-badge" id="badge-od">0</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="cellcount" role="tab" aria-selected="false">
+        Cell Count <span class="tab-badge" id="badge-cellcount">0</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="lemna" role="tab" aria-selected="false">
+        Lemna minor <span class="tab-badge" id="badge-lemna">0</span>
+      </button>
+      <button type="button" class="tab-btn" data-tab="dilutions" role="tab" aria-selected="false">
+        Dilutions &amp; Notes <span class="tab-badge" id="badge-dilutions">0</span>
+      </button>
+    </div>
+
+    <div class="exp-meta-pills" id="exp-meta-pills"></div>
+  </nav>
+
+  <!-- ================= TAB 1: OD MEASUREMENTS ================= -->
+  <main id="panel-od" class="tab-panel active">
+    <div class="workspace-split">
+      <!-- LEFT: Input Form & Recorded Entries -->
+      <aside class="panel-left">
+        <section class="section-card">
+          <div class="section-header">
+            <h2 class="section-title" id="od-form-title">New OD Measurement</h2>
+            <button type="button" id="btn-od-batch" class="btn btn-xs">+ Batch Entry</button>
+          </div>
+          <form id="od-form" autocomplete="off">
+            <input type="hidden" id="od-edit-id" value="" />
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="od-date">Date</label>
+                <input type="date" id="od-date" class="input input-mono" required />
+              </div>
+              <div class="form-field">
+                <label for="od-time">Time</label>
+                <input type="time" id="od-time" class="input input-mono" required />
+              </div>
+              <div class="form-field">
+                <label for="od-conc">Concentration (<span class="unit-label">g/mL</span>)</label>
+                <input type="number" step="any" id="od-conc" class="input input-mono" placeholder="e.g. 0, 0.25, 1" required />
+              </div>
+              <div class="form-field">
+                <label for="od-value">OD Value</label>
+                <input type="number" step="any" min="0" id="od-value" class="input input-mono" placeholder="e.g. 0.094" required />
+              </div>
+              <div class="form-field">
+                <label for="od-wavelength">Wavelength (nm)</label>
+                <input type="number" step="1" min="200" max="1000" id="od-wavelength" class="input input-mono" value="680" required />
+              </div>
+              <div class="form-field">
+                <label for="od-label">Well / Replicate <span class="form-hint">optional</span></label>
+                <input type="text" id="od-label" class="input" placeholder="e.g. plate_1_1.l" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" id="od-submit-btn" class="btn btn-primary">Add Measurement</button>
+              <button type="button" id="od-cancel-edit" class="btn" hidden>Cancel</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="entries-section">
+          <div class="section-header">
+            <h3 class="section-title">Recorded OD Entries (<span id="od-list-count">0</span>)</h3>
+            <button type="button" id="btn-od-clear" class="btn btn-xs btn-danger">Clear All</button>
+          </div>
+          <div class="entries-toolbar">
+            <input type="text" id="od-filter-search" class="input" placeholder="Filter date, conc, well..." />
+            <select id="od-filter-conc" class="input" style="max-width: 120px;">
+              <option value="all">All conc.</option>
+            </select>
+          </div>
+          <div id="od-entries-list" class="entries-list"></div>
+        </section>
+      </aside>
+
+      <!-- RIGHT: Analysis Controls, KPIs, 4 Interactive Charts & Tables -->
+      <section class="panel-right">
+        <div class="analysis-bar">
+          <div class="analysis-filters">
+            <label class="inline-control">
+              Wavelength
+              <select id="od-ctrl-wavelength"></select>
+            </label>
+            <label class="inline-control">
+              Control Conc.
+              <select id="od-ctrl-conc"></select>
+            </label>
+            <label class="inline-control" title="Optional exponential phase start (elapsed hours)">
+              t_start (h)
+              <input type="number" step="any" min="0" id="od-t-start" placeholder="auto" />
+            </label>
+            <label class="inline-control" title="Optional exponential phase end (elapsed hours)">
+              t_end (h)
+              <input type="number" step="any" min="0" id="od-t-end" placeholder="auto" />
+            </label>
+          </div>
+          <button type="button" id="btn-od-export-csv" class="btn btn-sm">Export Tables CSV</button>
+        </div>
+
+        <div class="kpi-grid" id="od-kpis">
+          <div class="kpi-card">
+            <div class="kpi-label">Control μ (h⁻¹)</div>
+            <div class="kpi-value accent" id="od-kpi-ctrl-mu">—</div>
+            <div class="kpi-sub" id="od-kpi-ctrl-r2">Exponential fit R²</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Max Inhibition</div>
+            <div class="kpi-value crimson" id="od-kpi-max-inh">—</div>
+            <div class="kpi-sub" id="od-kpi-max-inh-conc">Highest observed</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Est. IC50 (Linear)</div>
+            <div class="kpi-value" id="od-kpi-ic50">—</div>
+            <div class="kpi-sub" id="od-kpi-ic50-sub">50% inhibition threshold</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Dataset Coverage</div>
+            <div class="kpi-value" id="od-kpi-coverage">0</div>
+            <div class="kpi-sub" id="od-kpi-coverage-sub">Timepoints · Concentrations</div>
+          </div>
+        </div>
+
+        <div class="charts-grid">
+          <div class="chart-card"><div id="od-chart-growth" class="chart-box"></div></div>
+          <div class="chart-card"><div id="od-chart-semilog" class="chart-box"></div></div>
+          <div class="chart-card"><div id="od-chart-mu" class="chart-box"></div></div>
+          <div class="chart-card"><div id="od-chart-dose" class="chart-box"></div></div>
+        </div>
+
+        <div class="tables-card">
+          <div class="tables-header">
+            <div class="subtabs" id="od-table-tabs">
+              <button type="button" class="subtab-btn active" data-table="summary">Overall μ &amp; Inhibition</button>
+              <button type="button" class="subtab-btn" data-table="averaged">Averaged OD ± SD</button>
+              <button type="button" class="subtab-btn" data-table="kinetics">Kinetics Over Time</button>
+            </div>
+            <span class="form-hint">Matches notebook ODValue tables</span>
+          </div>
+          <div class="table-scroll" id="od-table-container"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= TAB 2: CELL COUNT ================= -->
+  <main id="panel-cellcount" class="tab-panel">
+    <div class="workspace-split">
+      <!-- LEFT: Cell Count Input Form & Entries List -->
+      <aside class="panel-left">
+        <section class="section-card">
+          <div class="section-header">
+            <h2 class="section-title" id="cc-form-title">New Cell Count</h2>
+            <div class="segmented" id="cc-mode-toggle" role="group" aria-label="Cell count input mode">
+              <button type="button" class="active" data-mode="chamber">Chamber</button>
+              <button type="button" data-mode="direct">Direct</button>
+            </div>
+          </div>
+
+          <form id="cc-form" autocomplete="off">
+            <input type="hidden" id="cc-edit-id" value="" />
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="cc-date">Date</label>
+                <input type="date" id="cc-date" class="input input-mono" required />
+              </div>
+              <div class="form-field">
+                <label for="cc-time">Time</label>
+                <input type="time" id="cc-time" class="input input-mono" required />
+              </div>
+              <div class="form-field">
+                <label for="cc-conc">Concentration (<span class="unit-label">g/mL</span>)</label>
+                <input type="number" step="any" id="cc-conc" class="input input-mono" value="0" required />
+              </div>
+              <div class="form-field">
+                <label for="cc-sample-id">Sample / Rep</label>
+                <input type="text" id="cc-sample-id" class="input" placeholder="e.g. Rep 1, Vorkultur" />
+              </div>
+
+              <!-- Chamber Mode Fields -->
+              <div class="form-field full cc-chamber-field">
+                <label for="cc-cells-expr">Cells Counted <span class="form-hint">supports sums: 18+14+19+20</span></label>
+                <input type="text" id="cc-cells-expr" class="input input-mono" placeholder="e.g. 18+14+19+20 or 71" />
+              </div>
+              <div class="form-field cc-chamber-field">
+                <label for="cc-squares">Small Squares</label>
+                <input type="number" step="1" min="1" id="cc-squares" class="input input-mono" value="64" />
+              </div>
+              <div class="form-field cc-chamber-field">
+                <label for="cc-dilution">Dilution Factor</label>
+                <input type="number" step="any" min="0.0001" id="cc-dilution" class="input input-mono" value="1" />
+              </div>
+              <div class="form-field cc-chamber-field">
+                <label for="cc-chamber-factor">Chamber Factor</label>
+                <select id="cc-chamber-factor" class="input input-mono">
+                  <option value="4000000">4×10⁶ (Thoma/Neubauer small)</option>
+                  <option value="10000">1×10⁴ (Neubauer large sq.)</option>
+                  <option value="250000">2.5×10⁵ (Medium sq.)</option>
+                </select>
+              </div>
+              <div class="form-field cc-chamber-field">
+                <label for="cc-volume-ul">Sample Vol (µL)</label>
+                <input type="number" step="any" min="0" id="cc-volume-ul" class="input input-mono" value="1000" />
+              </div>
+
+              <!-- Direct Mode Field -->
+              <div class="form-field full cc-direct-field" hidden>
+                <label for="cc-direct-val">Cell Concentration (cells/mL)</label>
+                <input type="number" step="any" min="0" id="cc-direct-val" class="input input-mono" placeholder="e.g. 3656250" />
+              </div>
+            </div>
+
+            <div class="live-preview-box" id="cc-live-preview">
+              <span>Calculated Density</span>
+              <strong id="cc-preview-val">— cells/mL</strong>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="cc-submit-btn" class="btn btn-primary">Add Cell Count</button>
+              <button type="button" id="cc-cancel-edit" class="btn" hidden>Cancel</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="entries-section">
+          <div class="section-header">
+            <h3 class="section-title">Recorded Cell Counts (<span id="cc-list-count">0</span>)</h3>
+            <button type="button" id="btn-cc-clear" class="btn btn-xs btn-danger">Clear All</button>
+          </div>
+          <div class="entries-toolbar">
+            <input type="text" id="cc-filter-search" class="input" placeholder="Filter sample, conc, date..." />
+            <select id="cc-filter-conc" class="input" style="max-width: 120px;">
+              <option value="all">All conc.</option>
+            </select>
+          </div>
+          <div id="cc-entries-list" class="entries-list"></div>
+        </section>
+      </aside>
+
+      <!-- RIGHT: Kinetics Graphs, Inoculation Calculator & Tables -->
+      <section class="panel-right">
+        <div class="analysis-bar">
+          <div class="analysis-filters">
+            <label class="inline-control">
+              Control Conc.
+              <select id="cc-ctrl-conc"></select>
+            </label>
+            <label class="inline-control">
+              t_start (h)
+              <input type="number" step="any" min="0" id="cc-t-start" placeholder="auto" />
+            </label>
+            <label class="inline-control">
+              t_end (h)
+              <input type="number" step="any" min="0" id="cc-t-end" placeholder="auto" />
+            </label>
+          </div>
+          <button type="button" id="btn-cc-export-csv" class="btn btn-sm">Export Tables CSV</button>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Latest Control Density</div>
+            <div class="kpi-value accent" id="cc-kpi-latest">—</div>
+            <div class="kpi-sub">cells/mL (mean)</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Control μ (h⁻¹)</div>
+            <div class="kpi-value" id="cc-kpi-ctrl-mu">—</div>
+            <div class="kpi-sub" id="cc-kpi-ctrl-r2">Requires ≥ 2 timepoints</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Est. IC50 (Linear)</div>
+            <div class="kpi-value crimson" id="cc-kpi-ic50">—</div>
+            <div class="kpi-sub" id="cc-kpi-ic50-sub">50% inhibition threshold</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Dataset Coverage</div>
+            <div class="kpi-value" id="cc-kpi-coverage">0</div>
+            <div class="kpi-sub" id="cc-kpi-coverage-sub">Timepoints · Concentrations</div>
+          </div>
+        </div>
+
+        <!-- Vorkultur / Inoculation Dilution Helper (from notebook Cell 3 & 4) -->
+        <div class="calc-drawer">
+          <div class="section-header" style="margin-bottom: 10px;">
+            <h3 class="section-title">Vorkultur / Inoculation Calculator (C₁·V₁ = C₂·V₂)</h3>
+            <span class="form-hint">Quick dilution for starting algal cultures</span>
+          </div>
+          <div class="calc-grid">
+            <div class="form-field">
+              <label for="inoc-source">Stock Source</label>
+              <select id="inoc-source" class="input"></select>
+            </div>
+            <div class="form-field">
+              <label for="inoc-c1">Stock C₁ (cells/mL)</label>
+              <input type="number" step="any" id="inoc-c1" class="input input-mono" value="3656250" />
+            </div>
+            <div class="form-field">
+              <label for="inoc-c2">Target C₂ (cells/mL)</label>
+              <input type="number" step="any" id="inoc-c2" class="input input-mono" value="100000" />
+            </div>
+            <div class="form-field">
+              <label for="inoc-v2">Final Vol V₂ (mL)</label>
+              <input type="number" step="any" id="inoc-v2" class="input input-mono" value="100" />
+            </div>
+          </div>
+          <div class="calc-result" id="inoc-result"></div>
+        </div>
+
+        <div class="charts-grid">
+          <div class="chart-card"><div id="cc-chart-growth" class="chart-box"></div></div>
+          <div class="chart-card"><div id="cc-chart-semilog" class="chart-box"></div></div>
+          <div class="chart-card"><div id="cc-chart-mu" class="chart-box"></div></div>
+          <div class="chart-card"><div id="cc-chart-dose" class="chart-box"></div></div>
+        </div>
+
+        <div class="tables-card">
+          <div class="tables-header">
+            <div class="subtabs" id="cc-table-tabs">
+              <button type="button" class="subtab-btn active" data-table="summary">Overall μ &amp; Inhibition</button>
+              <button type="button" class="subtab-btn" data-table="averaged">Averaged Cells/mL ± SD</button>
+              <button type="button" class="subtab-btn" data-table="kinetics">Kinetics Over Time</button>
+            </div>
+            <span class="form-hint">Thoma / Neubauer kinetics</span>
+          </div>
+          <div class="table-scroll" id="cc-table-container"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= TAB 3: LEMNA MINOR ================= -->
+  <main id="panel-lemna" class="tab-panel">
+    <div class="workspace-split">
+      <!-- LEFT: Lemna Input & Entries List -->
+      <aside class="panel-left">
+        <section class="section-card">
+          <div class="section-header">
+            <h2 class="section-title" id="lemna-form-title">New Lemna Sample</h2>
+            <span class="form-hint">μ = (ln Nₜ − ln N₀) / t</span>
+          </div>
+          <form id="lemna-form" autocomplete="off">
+            <input type="hidden" id="lemna-edit-id" value="" />
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="lemna-conc">Dilution / Conc. (<span class="unit-label">g/mL</span>)</label>
+                <input type="number" step="any" id="lemna-conc" class="input input-mono" placeholder="0 = Control" required />
+              </div>
+              <div class="form-field">
+                <label for="lemna-hours">Duration t (h)</label>
+                <input type="number" step="any" min="0.1" id="lemna-hours" class="input input-mono" value="168" required />
+              </div>
+              <div class="form-field">
+                <label for="lemna-n0-a">Rep A — Day 0 (N₀)</label>
+                <input type="number" step="any" min="1" id="lemna-n0-a" class="input input-mono" placeholder="e.g. 11" required />
+              </div>
+              <div class="form-field">
+                <label for="lemna-nt-a">Rep A — Final (Nₜ)</label>
+                <input type="number" step="any" min="1" id="lemna-nt-a" class="input input-mono" placeholder="e.g. 31" required />
+              </div>
+              <div class="form-field">
+                <label for="lemna-n0-b">Rep B — Day 0 <span class="form-hint">opt</span></label>
+                <input type="number" step="any" min="1" id="lemna-n0-b" class="input input-mono" placeholder="e.g. 11" />
+              </div>
+              <div class="form-field">
+                <label for="lemna-nt-b">Rep B — Final <span class="form-hint">opt</span></label>
+                <input type="number" step="any" min="1" id="lemna-nt-b" class="input input-mono" placeholder="e.g. 22" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" id="lemna-submit-btn" class="btn btn-primary">Add Lemna Sample</button>
+              <button type="button" id="lemna-cancel-edit" class="btn" hidden>Cancel</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="entries-section">
+          <div class="section-header">
+            <h3 class="section-title">Lemna Samples (<span id="lemna-list-count">0</span>)</h3>
+            <button type="button" id="btn-lemna-clear" class="btn btn-xs btn-danger">Clear All</button>
+          </div>
+          <div id="lemna-entries-list" class="entries-list"></div>
+        </section>
+      </aside>
+
+      <!-- RIGHT: Lemna Charts & Summary Table -->
+      <section class="panel-right">
+        <div class="analysis-bar">
+          <div class="analysis-filters">
+            <label class="inline-control">
+              Control Conc.
+              <select id="lemna-ctrl-conc"></select>
+            </label>
+          </div>
+          <button type="button" id="btn-lemna-export-csv" class="btn btn-sm">Export Lemna CSV</button>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Control μ (h⁻¹)</div>
+            <div class="kpi-value accent" id="lemna-kpi-ctrl-mu">—</div>
+            <div class="kpi-sub" id="lemna-kpi-ctrl-td">Doubling time</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Max Hemmung</div>
+            <div class="kpi-value crimson" id="lemna-kpi-max-inh">—</div>
+            <div class="kpi-sub" id="lemna-kpi-max-inh-conc">Highest observed</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Est. IC50 (Linear)</div>
+            <div class="kpi-value" id="lemna-kpi-ic50">—</div>
+            <div class="kpi-sub" id="lemna-kpi-ic50-sub">50% inhibition threshold</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Samples</div>
+            <div class="kpi-value" id="lemna-kpi-count">0</div>
+            <div class="kpi-sub">Dilution levels</div>
+          </div>
+        </div>
+
+        <div class="charts-grid lemna-grid">
+          <div class="chart-card"><div id="lemna-chart-fronds" class="chart-box"></div></div>
+          <div class="chart-card"><div id="lemna-chart-mu" class="chart-box"></div></div>
+          <div class="chart-card span-2"><div id="lemna-chart-dose" class="chart-box"></div></div>
+        </div>
+
+        <div class="tables-card">
+          <div class="tables-header">
+            <span class="section-title">Lemna minor Summary Table</span>
+            <span class="form-hint">Matches LemnaSample.to_dataframe()</span>
+          </div>
+          <div class="table-scroll" id="lemna-table-container"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= TAB 4: DILUTIONS & NOTES ================= -->
+  <main id="panel-dilutions" class="tab-panel">
+    <div class="workspace-split">
+      <!-- LEFT: Dilution Series Builder & List -->
+      <aside class="panel-left">
+        <section class="section-card">
+          <div class="section-header">
+            <h2 class="section-title">Add Dilution Step</h2>
+            <button type="button" id="btn-dil-daphnia" class="btn btn-xs" title="Load Daphnia 20 mL preset">Load Daphnia 20mL</button>
+          </div>
+          <form id="dil-form" autocomplete="off">
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="dil-conc">Target Conc. (<span class="unit-label">g/mL</span>)</label>
+                <input type="number" step="any" id="dil-conc" class="input input-mono" placeholder="e.g. 0.5" required />
+              </div>
+              <div class="form-field">
+                <label for="dil-total">Total Volume (mL)</label>
+                <input type="number" step="any" min="0.01" id="dil-total" class="input input-mono" value="10" required />
+              </div>
+              <div class="form-field">
+                <label for="dil-tox-vol">Toxicant Vol (mL)</label>
+                <input type="number" step="any" min="0" id="dil-tox-vol" class="input input-mono" placeholder="e.g. 0.05" required />
+              </div>
+              <div class="form-field">
+                <label for="dil-med-vol">Medium Vol (mL) <span class="form-hint">auto</span></label>
+                <input type="number" step="any" min="0" id="dil-med-vol" class="input input-mono" readonly />
+              </div>
+              <div class="form-field">
+                <label for="dil-med-name">Medium Name</label>
+                <input type="text" id="dil-med-name" class="input" value="BBM" />
+              </div>
+              <div class="form-field">
+                <label for="dil-tox-name">Toxicant Name</label>
+                <input type="text" id="dil-tox-name" class="input" value="Bi58" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Add Dilution Row</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="entries-section">
+          <div class="section-header">
+            <h3 class="section-title">Verdünnungsreihe (<span id="dil-list-count">0</span>)</h3>
+            <button type="button" id="btn-dil-clear" class="btn btn-xs btn-danger">Clear All</button>
+          </div>
+          <div id="dil-entries-list" class="entries-list"></div>
+        </section>
+      </aside>
+
+      <!-- RIGHT: Stacked Volume Chart, Pipetting Table & Lab Notes -->
+      <section class="panel-right">
+        <div class="chart-card">
+          <div id="dilution-chart-bars" class="chart-box"></div>
+        </div>
+
+        <div class="tables-card">
+          <div class="tables-header">
+            <span class="section-title">Pipetting Plan (Verdünnungsreihe)</span>
+            <button type="button" id="btn-dil-export-csv" class="btn btn-xs">Export CSV</button>
+          </div>
+          <div class="table-scroll" id="dil-table-container"></div>
+        </div>
+
+        <div class="notes-card">
+          <div class="section-header">
+            <h3 class="section-title">Experiment Lab Notes</h3>
+            <span class="form-hint" id="notes-save-status">Saved locally</span>
+          </div>
+          <textarea id="exp-notes-textarea" class="input" placeholder="Record observations, culture swaps, Daphnientest notes, anomalies..."></textarea>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= MODAL: NEW / EDIT EXPERIMENT ================= -->
+  <div class="modal-backdrop" id="exp-modal" role="dialog" aria-modal="true" aria-labelledby="exp-modal-title">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="exp-modal-title">New Experiment</h2>
+        <button type="button" class="btn btn-ghost btn-sm" data-close-modal="exp-modal">✕</button>
+      </div>
+      <form id="exp-modal-form">
+        <div class="modal-body">
+          <input type="hidden" id="exp-modal-mode" value="create" />
+          <div class="form-grid">
+            <div class="form-field full">
+              <label for="exp-name-input">Experiment Name</label>
+              <input type="text" id="exp-name-input" class="input" placeholder="e.g. Copper Sulfate Algae Test — Dec 2026" required />
+            </div>
+            <div class="form-field">
+              <label for="exp-pollutant-input">Pollutant / Test Substance</label>
+              <input type="text" id="exp-pollutant-input" class="input" placeholder="e.g. Bi58, CuSO4, Glyphosate" />
+            </div>
+            <div class="form-field">
+              <label for="exp-organism-input">Test Organism</label>
+              <input type="text" id="exp-organism-input" class="input" placeholder="e.g. Desmodesmus / Lemna" />
+            </div>
+            <div class="form-field">
+              <label for="exp-unit-input">Concentration Unit</label>
+              <input type="text" id="exp-unit-input" class="input input-mono" value="mg/L" required />
+            </div>
+            <div class="form-field">
+              <label for="exp-control-input">Control Concentration</label>
+              <input type="number" step="any" id="exp-control-input" class="input input-mono" value="0" required />
+            </div>
+            <div class="form-field full">
+              <label for="exp-wl-input">Default OD Wavelength (nm)</label>
+              <input type="number" step="1" min="200" max="1000" id="exp-wl-input" class="input input-mono" value="680" required />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content: space-between;">
+          <div id="exp-edit-danger-actions" style="display: flex; gap: 6px;" hidden>
+            <button type="button" id="btn-duplicate-exp" class="btn btn-sm">Duplicate</button>
+            <button type="button" id="btn-delete-exp" class="btn btn-sm btn-danger">Delete</button>
+          </div>
+          <div style="display: flex; gap: 8px; margin-left: auto;">
+            <button type="button" class="btn" data-close-modal="exp-modal">Cancel</button>
+            <button type="submit" id="exp-modal-submit" class="btn btn-primary">Create Experiment</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: OD QUICK BATCH ENTRY ================= -->
+  <div class="modal-backdrop" id="batch-modal" role="dialog" aria-modal="true" aria-labelledby="batch-modal-title">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 class="modal-title" id="batch-modal-title">Quick Batch OD Entry (Single Timepoint)</h2>
+        <button type="button" class="btn btn-ghost btn-sm" data-close-modal="batch-modal">✕</button>
+      </div>
+      <form id="batch-modal-form">
+        <div class="modal-body">
+          <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+            <div class="form-field">
+              <label for="batch-date">Date</label>
+              <input type="date" id="batch-date" class="input input-mono" required />
+            </div>
+            <div class="form-field">
+              <label for="batch-time">Time</label>
+              <input type="time" id="batch-time" class="input input-mono" required />
+            </div>
+            <div class="form-field">
+              <label for="batch-wl">Wavelength (nm)</label>
+              <input type="number" id="batch-wl" class="input input-mono" value="680" required />
+            </div>
+          </div>
+
+          <table class="batch-table">
+            <thead>
+              <tr>
+                <th>Concentration (<span class="unit-label">g/mL</span>)</th>
+                <th>Replicate 1 (OD)</th>
+                <th>Replicate 2 (OD)</th>
+                <th>Replicate 3 (opt)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="batch-rows-body"></tbody>
+          </table>
+
+          <div style="margin-top: 10px;">
+            <button type="button" id="btn-batch-add-row" class="btn btn-xs">+ Add Concentration Row</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" data-close-modal="batch-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Batch Measurements</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= TOAST CONTAINER ================= -->
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Local lab notebooks & personal experiment save files
+calculations.ipynb
+saves/
+
+# System & editor files
+skills/
+.DS_Store
+Thumbs.db
+*.log
