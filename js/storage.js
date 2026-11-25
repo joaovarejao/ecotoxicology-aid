@@ -53,6 +53,10 @@
       vibrioEntries: [],
       dilutions: [],
       notes: "",
+      chartSettings: {
+        variableStyles: {},
+        perChartStyles: {},
+      },
     };
   }
 
@@ -76,6 +80,16 @@
       vibrioEntries: Array.isArray(exp.vibrioEntries) ? exp.vibrioEntries : [],
       dilutions: Array.isArray(exp.dilutions) ? exp.dilutions : [],
       notes: typeof exp.notes === "string" ? exp.notes : "",
+      chartSettings: {
+        variableStyles:
+          exp.chartSettings && typeof exp.chartSettings.variableStyles === "object"
+            ? exp.chartSettings.variableStyles
+            : {},
+        perChartStyles:
+          exp.chartSettings && typeof exp.chartSettings.perChartStyles === "object"
+            ? exp.chartSettings.perChartStyles
+            : {},
+      },
     };
   }
 

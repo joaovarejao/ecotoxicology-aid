@@ -204,7 +204,6 @@
               <button type="button" class="toggle-pill" id="od-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
-          <div class="chart-style-bar" data-style-tab="od"></div>
         </div>
 
         <div class="kpi-grid" id="od-kpis">
@@ -396,7 +395,6 @@
               <button type="button" class="toggle-pill" id="cc-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
-          <div class="chart-style-bar" data-style-tab="cc"></div>
         </div>
 
         <div class="kpi-grid">
@@ -570,7 +568,6 @@
               <button type="button" class="toggle-pill" id="lemna-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
-          <div class="chart-style-bar" data-style-tab="lemna"></div>
         </div>
 
         <div class="kpi-grid">
@@ -710,7 +707,6 @@
               <button type="button" class="toggle-pill" id="daphnia-toggle-logx" aria-pressed="false" title="Switch Dose-Response X-axis to log10 scale">Log X</button>
             </div>
           </div>
-          <div class="chart-style-bar" data-style-tab="daphnia"></div>
         </div>
 
         <div class="kpi-grid">
@@ -857,7 +853,6 @@
               <button type="button" class="toggle-pill" id="vibrio-toggle-logx" aria-pressed="false" title="Switch X-axis to log10 scale">Log X</button>
             </div>
           </div>
-          <div class="chart-style-bar" data-style-tab="vibrio"></div>
         </div>
 
         <div class="kpi-grid">
@@ -993,7 +988,6 @@
           </div>
           <div class="table-scroll" id="dil-table-container"></div>
           <div id="dilution-chart-wrap" class="dil-chart-collapse" hidden>
-            <div class="chart-style-bar chart-style-bar-inline" data-style-tab="dilutions"></div>
             <div class="chart-card" style="margin-top:10px; border:none; box-shadow:none; padding:0;">
               <div id="dilution-chart-bars" class="chart-box"></div>
             </div>
@@ -1182,10 +1176,13 @@
                     <option value="none">None (Markers only)</option>
                   </select>
                 </label>
-                <label class="studio-field">
-                  <span>Line Width <strong id="studio-line-width-val" class="mono">2.2 px</strong></span>
-                  <input type="range" id="studio-line-width" min="0.5" max="6" step="0.3" value="2.2" />
-                </label>
+                <div class="studio-field">
+                  <label for="studio-line-width-num">Line Width (px)</label>
+                  <div class="studio-range-num">
+                    <input type="range" id="studio-line-width" min="0.5" max="8" step="0.1" value="2.2" aria-label="Line Width Slider" />
+                    <input type="number" id="studio-line-width-num" class="input input-sm studio-num-input" min="0.5" max="12" step="0.1" value="2.2" />
+                  </div>
+                </div>
                 <label class="studio-field">
                   <span>Point / Marker Style</span>
                   <select id="studio-point-style" class="input input-sm">
@@ -1202,10 +1199,13 @@
                     <option value="none">None (Lines only)</option>
                   </select>
                 </label>
-                <label class="studio-field">
-                  <span>Point Size <strong id="studio-point-size-val" class="mono">7 px</strong></span>
-                  <input type="range" id="studio-point-size" min="3" max="16" step="1" value="7" />
-                </label>
+                <div class="studio-field">
+                  <label for="studio-point-size-num">Point Size (px)</label>
+                  <div class="studio-range-num">
+                    <input type="range" id="studio-point-size" min="2" max="18" step="0.5" value="7" aria-label="Point Size Slider" />
+                    <input type="number" id="studio-point-size-num" class="input input-sm studio-num-input" min="2" max="24" step="0.5" value="7" />
+                  </div>
+                </div>
                 <div class="studio-field">
                   <span>Primary / Single-Curve Color</span>
                   <div class="studio-color-row">
@@ -1216,8 +1216,11 @@
                 </div>
               </div>
               <div id="studio-series-colors-wrap" class="studio-series-wrap">
-                <div class="studio-sub-label">Per-Series / Concentration Colors</div>
-                <div id="studio-series-colors" class="series-color-grid"></div>
+                <div class="studio-sub-header">
+                  <span class="studio-sub-label">Variables (Consistent Across All Tabs)</span>
+                  <button type="button" id="btn-studio-reset-vars" class="btn btn-xs btn-ghost" title="Reset variable colors, line styles, and point styles across all tabs">Reset Variables</button>
+                </div>
+                <div id="studio-series-colors" class="series-var-list"></div>
               </div>
             </div>
 

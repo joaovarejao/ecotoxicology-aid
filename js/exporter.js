@@ -201,10 +201,11 @@
 
     const views = options.views || {};
     const perChartStyles = options.perChartStyles || {};
+    const variableStyles = options.variableStyles || {};
     const styleForTab = (tabKey, containerId) => {
       const base = views[tabKey]?.style || {};
       const ov = containerId ? perChartStyles[containerId] : null;
-      return C && C.mergeStyleOptions ? C.mergeStyleOptions(base, ov || {}) : base;
+      return C && C.mergeStyleOptions ? C.mergeStyleOptions(base, ov || {}, variableStyles) : base;
     };
 
     const chartSpecs = [];
@@ -262,6 +263,7 @@
                 tStartHours: options.odTStart ?? null,
                 tEndHours: options.odTEnd ?? null,
                 style: odView.style,
+                variableStyles,
               },
             },
             true
@@ -362,6 +364,7 @@
               tStartHours: options.ccTStart ?? null,
               tEndHours: options.ccTEnd ?? null,
               style: ccView.style,
+              variableStyles,
             },
           },
           true
@@ -439,6 +442,7 @@
           logX: Boolean(lemnaView.logX),
           icTarget: lemnaView.icTarget ?? 50,
           style: lemnaView.style,
+          variableStyles,
         });
         const prefix = `${slugify(exp.name)}_lemna`;
         chartCards.push(
@@ -516,6 +520,7 @@
           isolate: daphView.filterMode === "isolate",
           logX: Boolean(daphView.logX),
           style: daphView.style,
+          variableStyles,
         });
         const prefix = `${slugify(exp.name)}_daphnia`;
         chartCards.push(
@@ -612,6 +617,7 @@
           logX: Boolean(vibView.logX),
           showErrorBars: vibView.showErrorBars !== false,
           style: vibView.style,
+          variableStyles,
         });
         const prefix = `${slugify(exp.name)}_vibrio`;
         chartCards.push(

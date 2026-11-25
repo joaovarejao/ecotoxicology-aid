@@ -44,6 +44,7 @@
       vibrio: { selectedConcs: new Set(), filterMode: "highlight", showErrorBars: true, logX: false, targetPct: 50, style: { ...C.DEFAULT_CHART_STYLE } },
       dilutions: { style: { ...C.DEFAULT_CHART_STYLE } },
     },
+    variableStyles: {},
     perChartStyles: {},
     studio: {
       chartId: null,
@@ -76,7 +77,7 @@
     const hasSel = view.selectedConcs.size > 0;
     const chipsHtml = concs
       .map((c) => {
-        const color = C.getConcColor(c, concs, view.style?.palette, view.style?.seriesColors);
+        const color = C.getConcColor(c, concs, view.style?.palette, view.style?.seriesColors, state.variableStyles);
         const isSel = view.selectedConcs.has(c);
         const isCtrl = Number(c) === Number(controlConc);
         const cls = [
@@ -166,9 +167,31 @@
     return experiments.find((e) => e.id === activeExperimentId) || experiments[0];
   }
 
+  function syncChartSettingsFromExp(exp) {
+    const cs = exp && exp.chartSettings ? exp.chartSettings : {};
+    state.variableStyles =
+      cs.variableStyles && typeof cs.variableStyles === "object"
+        ? JSON.parse(JSON.stringify(cs.variableStyles))
+        : {};
+    state.perChartStyles =
+      cs.perChartStyles && typeof cs.perChartStyles === "object"
+        ? JSON.parse(JSON.stringify(cs.perChartStyles))
+        : {};
+  }
+
+  function saveChartSettingsToExp() {
+    const exp = getActiveExp();
+    if (!exp) return;
+    exp.chartSettings = {
+      variableStyles: JSON.parse(JSON.stringify(state.variableStyles || {})),
+      perChartStyles: JSON.parse(JSON.stringify(state.perChartStyles || {})),
+    };
+  }
+
   function persist() {
     const exp = getActiveExp();
     if (exp) {
+      saveChartSettingsToExp();
       exp.updatedAt = new Date().toISOString();
       state.workspace.activeExperimentId = exp.id;
     } else {
@@ -633,6 +656,7 @@
           tEndHours: tEnd,
           style: view.style,
           perChartStyles: state.perChartStyles,
+          variableStyles: state.variableStyles,
         },
       });
       refreshChartOverrideBadges();
@@ -1003,6 +1027,7 @@
           tEndHours: tEnd,
           style: view.style,
           perChartStyles: state.perChartStyles,
+          variableStyles: state.variableStyles,
         },
       });
       refreshChartOverrideBadges();
@@ -1137,6 +1162,7 @@
         icTarget: view.icTarget,
         style: view.style,
         perChartStyles: state.perChartStyles,
+        variableStyles: state.variableStyles,
       });
       refreshChartOverrideBadges();
     }
@@ -1308,6 +1334,7 @@
         logX: view.logX,
         style: view.style,
         perChartStyles: state.perChartStyles,
+        variableStyles: state.variableStyles,
       });
       refreshChartOverrideBadges();
     }
@@ -1485,6 +1512,7 @@
         showErrorBars: view.showErrorBars,
         style: view.style,
         perChartStyles: state.perChartStyles,
+        variableStyles: state.variableStyles,
       });
       refreshChartOverrideBadges();
     }
@@ -1731,7 +1759,7 @@
     if (state.activeTab === "dilutions") {
       if (state.dilChartOpen) {
         $("dilution-chart-wrap").hidden = false;
-        C.renderDilutionChart(sorted, unit, { style: state.views.dilutions.style, perChartStyles: state.perChartStyles });
+        C.renderDilutionChart(sorted, unit, { style: state.views.dilutions.style, perChartStyles: state.perChartStyles, variableStyles: state.variableStyles });
         refreshChartOverrideBadges();
       }
       renderDocsHub();
@@ -1849,85 +1877,6 @@
     });
   }
 
-  function initChartStyleBars() {
-    const paletteOpts = Object.entries(C.PALETTES)
-      .map(([k, v]) => `<option value="${escapeHtml(k)}">${escapeHtml(v.label)}</option>`)
-      .join("");
-
-    document.querySelectorAll(".chart-style-bar[data-style-tab]").forEach((bar) => {
-      const tabKey = bar.dataset.styleTab;
-      bar.innerHTML = `
-        <span class="manip-label">Graph Style</span>
-        <label class="style-control" title="Color palette for all plots in this tab">
-          Palette
-          <select data-style-field="palette">${paletteOpts}</select>
-        </label>
-        <label class="style-control" title="Accent color for single-curve plots (Dose-Response / Probit / Bar)">
-          Color
-          <input type="color" data-style-field="primaryColor" value="#0d9488" />
-        </label>
-        <label class="style-control" title="Line dash pattern">
-          Line
-          <select data-style-field="lineStyle">
-            <option value="solid">Solid</option>
-            <option value="dash">Dashed</option>
-            <option value="dot">Dotted</option>
-            <option value="dashdot">Dash-Dot</option>
-            <option value="none">None</option>
-          </select>
-        </label>
-        <label class="style-control" title="Line stroke thickness">
-          Width
-          <input type="range" min="0.5" max="6" step="0.3" value="2.2" data-style-field="lineWidth" />
-          <span class="style-val-badge" data-style-badge="lineWidth">2.2</span>
-        </label>
-        <label class="style-control" title="Point / marker symbol">
-          Point
-          <select data-style-field="pointStyle">
-            <option value="auto">Auto</option>
-            <option value="circle">Circle ●</option>
-            <option value="square">Square ■</option>
-            <option value="diamond">Diamond ◆</option>
-            <option value="triangle-up">Triangle ▲</option>
-            <option value="triangle-down">Triangle ▼</option>
-            <option value="cross">Cross +</option>
-            <option value="x">X ✕</option>
-            <option value="star">Star ★</option>
-            <option value="circle-open">Open ○</option>
-            <option value="none">None</option>
-          </select>
-        </label>
-        <label class="style-control" title="Marker point size">
-          Size
-          <input type="range" min="3" max="16" step="1" value="7" data-style-field="pointSize" />
-          <span class="style-val-badge" data-style-badge="pointSize">7</span>
-        </label>
-        <button type="button" class="btn btn-xs btn-ghost" data-style-reset="1" title="Reset style options for this tab">Reset</button>
-      `;
-      syncStyleBarUI(tabKey);
-    });
-  }
-
-  function syncStyleBarUI(tabKey) {
-    const bar = document.querySelector(`.chart-style-bar[data-style-tab="${tabKey}"]`);
-    const style = state.views[tabKey]?.style;
-    if (!bar || !style) return;
-    const setVal = (sel, val) => {
-      const el = bar.querySelector(sel);
-      if (el) el.value = val;
-    };
-    setVal('[data-style-field="palette"]', style.palette || "default");
-    setVal('[data-style-field="primaryColor"]', style.primaryColor || "#0d9488");
-    setVal('[data-style-field="lineStyle"]', style.lineStyle || "solid");
-    setVal('[data-style-field="lineWidth"]', String(style.lineWidth ?? 2.2));
-    setVal('[data-style-field="pointStyle"]', style.pointStyle || "auto");
-    setVal('[data-style-field="pointSize"]', String(style.pointSize ?? 7));
-    const lwBadge = bar.querySelector('[data-style-badge="lineWidth"]');
-    if (lwBadge) lwBadge.textContent = Number(style.lineWidth ?? 2.2).toFixed(1);
-    const psBadge = bar.querySelector('[data-style-badge="pointSize"]');
-    if (psBadge) psBadge.textContent = String(style.pointSize ?? 7);
-  }
-
   function getTraceDisplayColor(tr, idx, paletteKey) {
     const pal = C.getPaletteColors(paletteKey);
     const c = tr.line?.color || (Array.isArray(tr.marker?.color) ? tr.marker.color[0] : tr.marker?.color);
@@ -1935,41 +1884,111 @@
     return pal[idx % pal.length];
   }
 
+  function extractStudioVariables(rawSpec, paletteKey) {
+    const dataTraces = (rawSpec.traces || []).filter((tr) => {
+      const name = String(tr.name || "");
+      if (tr.hoverinfo === "skip" && name === "Highlighted") return false;
+      if (tr.meta?.isFit || name.includes(" fit (") || name.startsWith("OLS Fit:")) return false;
+      if (name.startsWith("Est. ") || name.startsWith("Probit EC50")) return false;
+      return tr.type === "scatter" || tr.type === "bar";
+    });
+
+    const items = [];
+    const seen = new Set();
+    const barCount = dataTraces.filter((t) => t.type === "bar").length;
+
+    dataTraces.forEach((tr, idx) => {
+      if (tr.type === "bar" && barCount === 1 && Array.isArray(tr.meta?.concs)) {
+        const pal = C.getPaletteColors(paletteKey);
+        tr.meta.concs.forEach((c, ci) => {
+          const vKey = String(c);
+          if (seen.has(vKey)) return;
+          seen.add(vKey);
+          const lbl = Array.isArray(tr.x) && tr.x[ci] ? String(tr.x[ci]) : vKey;
+          const rawC = Array.isArray(tr.marker?.color) ? tr.marker.color[ci] : tr.marker?.color;
+          const defColor = typeof rawC === "string" && /^#[0-9a-fA-F]{6}$/.test(rawC) ? rawC : pal[ci % pal.length];
+          items.push({ varKey: vKey, concKey: vKey, label: lbl, defaultColor: defColor });
+        });
+        return;
+      }
+
+      const name = String(tr.name || `Series ${idx + 1}`);
+      const concKey = tr.meta && tr.meta.conc !== undefined ? String(tr.meta.conc) : "";
+      const metaVarKey = tr.meta && tr.meta.varKey ? String(tr.meta.varKey) : "";
+      const varKey = concKey || metaVarKey || name;
+      if (seen.has(varKey)) return;
+      seen.add(varKey);
+      items.push({
+        varKey,
+        concKey,
+        label: name,
+        defaultColor: getTraceDisplayColor(tr, idx, paletteKey),
+      });
+    });
+
+    return items;
+  }
+
   function populateStudioSeriesPickers(rawSpec, effectiveStyle) {
     const container = $("studio-series-colors");
     const wrap = $("studio-series-colors-wrap");
     if (!container || !wrap || !rawSpec) return;
 
-    const dataTraces = (rawSpec.traces || []).filter((tr) => {
-      const name = String(tr.name || "");
-      if (tr.hoverinfo === "skip" && name === "Highlighted") return false;
-      if (name.includes(" fit (") || name.startsWith("OLS Fit:")) return false;
-      if (name.startsWith("Est. ") || name.startsWith("Probit EC50")) return false;
-      return tr.type === "scatter" || tr.type === "bar";
-    });
-
-    if (dataTraces.length === 0) {
+    const items = extractStudioVariables(rawSpec, effectiveStyle.palette);
+    if (items.length === 0) {
       wrap.hidden = true;
       container.innerHTML = "";
       return;
     }
 
+    const lineOpts = [
+      ["", "Line: Default"],
+      ["solid", "Solid (—)"],
+      ["dash", "Dashed (- -)"],
+      ["dot", "Dotted (···)"],
+      ["dashdot", "Dash-Dot (-·-)"],
+      ["none", "No Line"],
+    ];
+    const pointOpts = [
+      ["", "Pt: Default"],
+      ["auto", "Auto"],
+      ["circle", "Circle ●"],
+      ["square", "Square ■"],
+      ["diamond", "Diamond ◆"],
+      ["triangle-up", "Tri Up ▲"],
+      ["triangle-down", "Tri Dn ▼"],
+      ["cross", "Cross +"],
+      ["x", "X ✕"],
+      ["star", "Star ★"],
+      ["circle-open", "Open ○"],
+      ["none", "No Pt"],
+    ];
+
     wrap.hidden = false;
-    container.innerHTML = dataTraces
-      .map((tr, idx) => {
-        const name = String(tr.name || `Series ${idx + 1}`);
-        const key = name;
-        const concKey = tr.meta && tr.meta.conc !== undefined ? String(tr.meta.conc) : null;
+    container.innerHTML = items
+      .map((it) => {
+        const vs = state.variableStyles[it.varKey] || (it.concKey && state.variableStyles[it.concKey]) || {};
         const curColor =
-          effectiveStyle.seriesColors?.[key] ||
-          (concKey && effectiveStyle.seriesColors?.[concKey]) ||
-          getTraceDisplayColor(tr, idx, effectiveStyle.palette);
+          vs.color ||
+          effectiveStyle.seriesStyles?.[it.varKey]?.color ||
+          effectiveStyle.seriesColors?.[it.varKey] ||
+          it.defaultColor;
         const safeHex = /^#[0-9a-fA-F]{6}$/.test(curColor) ? curColor : "#0d9488";
+        const curLine = vs.lineStyle || "";
+        const curPoint = vs.pointStyle || "";
+        const lineHtml = lineOpts
+          .map(([val, text]) => `<option value="${val}" ${val === curLine ? "selected" : ""}>${text}</option>`)
+          .join("");
+        const pointHtml = pointOpts
+          .map(([val, text]) => `<option value="${val}" ${val === curPoint ? "selected" : ""}>${text}</option>`)
+          .join("");
         return `
-          <label class="series-color-item" title="${escapeHtml(name)}">
-            <input type="color" data-series-key="${escapeHtml(key)}" data-conc-key="${escapeHtml(concKey || "")}" value="${safeHex}" />
-            <span>${escapeHtml(name)}</span>
-          </label>
+          <div class="series-var-row" title="${escapeHtml(it.label)}">
+            <input type="color" data-var-prop="color" data-var-key="${escapeHtml(it.varKey)}" data-conc-key="${escapeHtml(it.concKey)}" value="${safeHex}" aria-label="Color for ${escapeHtml(it.label)}" />
+            <span class="series-var-label">${escapeHtml(it.label)}</span>
+            <select class="series-var-select" data-var-prop="lineStyle" data-var-key="${escapeHtml(it.varKey)}" data-conc-key="${escapeHtml(it.concKey)}" aria-label="Line style for ${escapeHtml(it.label)}">${lineHtml}</select>
+            <select class="series-var-select" data-var-prop="pointStyle" data-var-key="${escapeHtml(it.varKey)}" data-conc-key="${escapeHtml(it.concKey)}" aria-label="Point style for ${escapeHtml(it.label)}">${pointHtml}</select>
+          </div>
         `;
       })
       .join("");
@@ -1977,13 +1996,15 @@
 
   function syncStudioFormFromState(effectiveStyle) {
     const mpl = state.studio.mplOpts;
+    const lw = Number(effectiveStyle.lineWidth ?? 2.2);
+    const ps = Number(effectiveStyle.pointSize ?? 7);
     $("studio-palette").value = effectiveStyle.palette || "default";
     $("studio-line-style").value = effectiveStyle.lineStyle || "solid";
-    $("studio-line-width").value = String(effectiveStyle.lineWidth ?? 2.2);
-    $("studio-line-width-val").textContent = `${Number(effectiveStyle.lineWidth ?? 2.2).toFixed(1)} px`;
+    $("studio-line-width").value = String(Math.min(8, Math.max(0.5, lw)));
+    $("studio-line-width-num").value = String(Number(lw.toFixed(2)));
     $("studio-point-style").value = effectiveStyle.pointStyle || "auto";
-    $("studio-point-size").value = String(effectiveStyle.pointSize ?? 7);
-    $("studio-point-size-val").textContent = `${effectiveStyle.pointSize ?? 7} px`;
+    $("studio-point-size").value = String(Math.min(18, Math.max(2, ps)));
+    $("studio-point-size-num").value = String(Number(ps.toFixed(2)));
 
     if (effectiveStyle.primaryColor) {
       $("studio-primary-color").value = effectiveStyle.primaryColor;
@@ -2003,13 +2024,17 @@
     $("studio-ylabel-input").value = mpl.yLabel || "";
   }
 
+  function getStudioMergedStyle() {
+    return C.mergeStyleOptions(state.studio.draftStyle, {}, state.variableStyles);
+  }
+
   function renderStudioPreview() {
     const chartId = state.studio.chartId;
     if (!chartId || !MP) return;
     const entry = C.getRenderedSpec(chartId);
     if (!entry || !entry.rawSpec) return;
 
-    const style = C.normalizeStyleOptions(state.studio.draftStyle);
+    const style = getStudioMergedStyle();
     const mplOpts = MP.normalizeMplOptions(state.studio.mplOpts);
     const previewSpec = MP.buildMatplotlibPreviewSpec(entry.rawSpec, style, mplOpts);
     const pyCode = MP.generatePythonScript(entry.rawSpec, style, mplOpts, entry.filePrefix || chartId);
@@ -2039,14 +2064,15 @@
       return;
     }
     const tabKey = inferTabFromChartId(chartId);
-    const baseStyle = state.views[tabKey]?.style || C.DEFAULT_CHART_STYLE;
+    const baseStyle = C.DEFAULT_CHART_STYLE;
     const override = state.perChartStyles[chartId] || {};
-    const effective = C.mergeStyleOptions(baseStyle, override);
+    const graphOnly = C.mergeStyleOptions(baseStyle, override);
+    const effective = C.mergeStyleOptions(baseStyle, override, state.variableStyles);
 
     state.studio.chartId = chartId;
     state.studio.tabKey = tabKey;
     state.studio.previewTab = "preview";
-    state.studio.draftStyle = effective;
+    state.studio.draftStyle = graphOnly;
     state.studio.mplOpts = { ...MP.DEFAULT_MPL_OPTIONS };
 
     $("chart-studio-title").textContent = entry.rawSpec.title || "Graph Style & Matplotlib Studio";
@@ -2155,6 +2181,7 @@
 
         if (loadedCount > 0 && openedId) {
           state.workspace.activeExperimentId = openedId;
+          syncChartSettingsFromExp(getActiveExp());
           state.odSelectedWavelength = null;
           state.odControlConc = null;
           state.ccControlConc = null;
@@ -2297,6 +2324,7 @@
     $("experiment-select").addEventListener("change", (ev) => {
       if (!ev.target.value) return;
       state.workspace.activeExperimentId = ev.target.value;
+      syncChartSettingsFromExp(getActiveExp());
       state.odSelectedWavelength = null;
       state.odControlConc = null;
       state.ccControlConc = null;
@@ -2360,6 +2388,7 @@
           ccTEnd: $("cc-t-end").value,
           views: state.views,
           perChartStyles: state.perChartStyles,
+          variableStyles: state.variableStyles,
         });
         toast(`Exported "${filename}"`);
       } catch (err) {
@@ -2418,6 +2447,7 @@
         const created = S.createBlankExperiment(payload);
         state.workspace.experiments.push(created);
         state.workspace.activeExperimentId = created.id;
+        syncChartSettingsFromExp(created);
         state.odSelectedWavelength = created.meta.defaultWavelength;
         state.odControlConc = created.meta.controlConc;
         state.ccControlConc = created.meta.controlConc;
@@ -2460,6 +2490,7 @@
       copy.updatedAt = copy.createdAt;
       state.workspace.experiments.push(copy);
       state.workspace.activeExperimentId = copy.id;
+      syncChartSettingsFromExp(copy);
       persist();
       renderAll();
       closeModal("exp-modal");
@@ -2474,6 +2505,7 @@
         state.workspace.experiments = state.workspace.experiments.filter((e) => e.id !== cur.id);
         state.workspace.activeExperimentId =
           state.workspace.experiments.length > 0 ? state.workspace.experiments[0].id : null;
+        syncChartSettingsFromExp(getActiveExp());
         state.odSelectedWavelength = null;
         state.odControlConc = null;
         state.ccControlConc = null;
@@ -3671,7 +3703,7 @@
         const exp = getActiveExp();
         if (exp) {
           const sorted = exp.dilutions.filter((d) => !d.ignored).sort((a, b) => Number(a.concentration) - Number(b.concentration));
-          C.renderDilutionChart(sorted, exp.meta.concUnit || "mg/L", { style: state.views.dilutions.style, perChartStyles: state.perChartStyles });
+          C.renderDilutionChart(sorted, exp.meta.concUnit || "mg/L", { style: state.views.dilutions.style, perChartStyles: state.perChartStyles, variableStyles: state.variableStyles });
           refreshChartOverrideBadges();
         }
       }
@@ -3748,81 +3780,75 @@
       target.render();
     });
 
-    // ---------- Tab Graph Style Strips ----------
-    document.querySelectorAll(".chart-style-bar[data-style-tab]").forEach((bar) => {
-      const tabKey = bar.dataset.styleTab;
-      const onStyleChange = (ev) => {
-        const ctrl = ev.target.closest("[data-style-field]");
-        if (!ctrl) return;
-        const field = ctrl.dataset.styleField;
-        const view = state.views[tabKey];
-        if (!view) return;
-        if (!view.style) view.style = { ...C.DEFAULT_CHART_STYLE };
-
-        if (field === "lineWidth" || field === "pointSize") {
-          view.style[field] = Number(ctrl.value);
-          const badge = bar.querySelector(`[data-style-badge="${field}"]`);
-          if (badge) badge.textContent = field === "lineWidth" ? Number(ctrl.value).toFixed(1) : String(ctrl.value);
-        } else if (field === "palette") {
-          view.style.palette = ctrl.value;
-          view.style.primaryColor = "";
-          view.style.seriesColors = {};
-        } else {
-          view.style[field] = ctrl.value;
-        }
-        renderTabByKey(tabKey);
-      };
-
-      bar.addEventListener("input", onStyleChange);
-      bar.addEventListener("change", onStyleChange);
-      bar.addEventListener("click", (ev) => {
-        const resetBtn = ev.target.closest("[data-style-reset]");
-        if (!resetBtn || !state.views[tabKey]) return;
-        state.views[tabKey].style = { ...C.DEFAULT_CHART_STYLE, seriesColors: {} };
-        syncStyleBarUI(tabKey);
-        renderTabByKey(tabKey);
-        toast("Reset tab graph style");
-      });
-    });
-
     // ---------- Graph Style & Matplotlib Studio Events ----------
     function applyStudioDraftToLive() {
       const chartId = state.studio.chartId;
       const tabKey = state.studio.tabKey;
       if (!chartId || !tabKey) return;
       if ($("studio-sync-live").checked) {
-        state.perChartStyles[chartId] = C.normalizeStyleOptions(state.studio.draftStyle);
+        const cleanGraphStyle = C.normalizeStyleOptions({ ...state.studio.draftStyle, seriesStyles: {} });
+        state.perChartStyles[chartId] = cleanGraphStyle;
+        persist();
         renderTabByKey(tabKey);
       }
       renderStudioPreview();
     }
 
-    const studioFieldMap = [
+    function bindRangeAndNumber(rangeId, numId, field, minVal, maxVal, sliderMax) {
+      const rangeEl = $(rangeId);
+      const numEl = $(numId);
+      if (rangeEl) {
+        rangeEl.addEventListener("input", () => {
+          const v = Number(rangeEl.value);
+          if (!Number.isFinite(v)) return;
+          state.studio.draftStyle[field] = v;
+          if (numEl) numEl.value = String(Number(v.toFixed(2)));
+          applyStudioDraftToLive();
+        });
+      }
+      if (numEl) {
+        numEl.addEventListener("input", () => {
+          const raw = numEl.value.trim();
+          if (raw === "") return;
+          const v = Number(raw);
+          if (!Number.isFinite(v)) return;
+          const clamped = Math.min(maxVal, Math.max(minVal, v));
+          state.studio.draftStyle[field] = clamped;
+          if (rangeEl) rangeEl.value = String(Math.min(sliderMax, Math.max(minVal, clamped)));
+          applyStudioDraftToLive();
+        });
+        numEl.addEventListener("change", () => {
+          const v = Number(numEl.value);
+          const clamped = Number.isFinite(v)
+            ? Math.min(maxVal, Math.max(minVal, v))
+            : Number(state.studio.draftStyle[field] ?? minVal);
+          state.studio.draftStyle[field] = clamped;
+          numEl.value = String(Number(clamped.toFixed(2)));
+          if (rangeEl) rangeEl.value = String(Math.min(sliderMax, Math.max(minVal, clamped)));
+          applyStudioDraftToLive();
+        });
+      }
+    }
+
+    bindRangeAndNumber("studio-line-width", "studio-line-width-num", "lineWidth", 0.5, 12, 8);
+    bindRangeAndNumber("studio-point-size", "studio-point-size-num", "pointSize", 2, 24, 18);
+
+    [
       ["studio-palette", "palette", "change"],
       ["studio-line-style", "lineStyle", "change"],
       ["studio-point-style", "pointStyle", "change"],
-      ["studio-line-width", "lineWidth", "input"],
-      ["studio-point-size", "pointSize", "input"],
       ["studio-primary-color", "primaryColor", "input"],
-    ];
-
-    studioFieldMap.forEach(([elId, field, evtName]) => {
+    ].forEach(([elId, field, evtName]) => {
       const el = $(elId);
       if (!el) return;
       el.addEventListener(evtName, () => {
-        if (field === "lineWidth") {
-          state.studio.draftStyle.lineWidth = Number(el.value);
-          $("studio-line-width-val").textContent = `${Number(el.value).toFixed(1)} px`;
-        } else if (field === "pointSize") {
-          state.studio.draftStyle.pointSize = Number(el.value);
-          $("studio-point-size-val").textContent = `${el.value} px`;
-        } else if (field === "palette") {
+        if (field === "palette") {
           state.studio.draftStyle.palette = el.value;
           state.studio.draftStyle.primaryColor = "";
           state.studio.draftStyle.seriesColors = {};
           $("studio-primary-color-hex").textContent = "Auto";
           const entry = C.getRenderedSpec(state.studio.chartId);
-          if (entry && entry.rawSpec) populateStudioSeriesPickers(entry.rawSpec, state.studio.draftStyle);
+          if (entry && entry.rawSpec) populateStudioSeriesPickers(entry.rawSpec, getStudioMergedStyle());
         } else if (field === "primaryColor") {
           state.studio.draftStyle.primaryColor = el.value;
           $("studio-primary-color-hex").textContent = el.value;
@@ -3840,15 +3866,48 @@
       applyStudioDraftToLive();
     });
 
-    $("studio-series-colors")?.addEventListener("input", (ev) => {
-      const picker = ev.target.closest("input[type='color'][data-series-key]");
-      if (!picker) return;
-      if (!state.studio.draftStyle.seriesColors) state.studio.draftStyle.seriesColors = {};
-      state.studio.draftStyle.seriesColors[picker.dataset.seriesKey] = picker.value;
-      if (picker.dataset.concKey) {
-        state.studio.draftStyle.seriesColors[picker.dataset.concKey] = picker.value;
+    function handleStudioVarChange(ev) {
+      const ctrl = ev.target.closest("[data-var-prop]");
+      if (!ctrl) return;
+      const varKey = ctrl.dataset.varKey;
+      const prop = ctrl.dataset.varProp;
+      if (!varKey || !prop) return;
+
+      const cur = { ...(state.variableStyles[varKey] || {}) };
+      if (prop === "color") {
+        cur.color = ctrl.value;
+      } else if (prop === "lineStyle" || prop === "pointStyle") {
+        if (!ctrl.value) delete cur[prop];
+        else cur[prop] = ctrl.value;
       }
-      applyStudioDraftToLive();
+
+      if (Object.keys(cur).length === 0) {
+        delete state.variableStyles[varKey];
+      } else {
+        state.variableStyles[varKey] = cur;
+      }
+
+      if ($("studio-sync-live")?.checked && state.studio.tabKey) {
+        persist();
+        renderTabByKey(state.studio.tabKey);
+      } else {
+        persist();
+      }
+      renderStudioPreview();
+    }
+
+    $("studio-series-colors")?.addEventListener("input", handleStudioVarChange);
+    $("studio-series-colors")?.addEventListener("change", handleStudioVarChange);
+
+    $("btn-studio-reset-vars")?.addEventListener("click", () => {
+      state.variableStyles = {};
+      if (state.studio.draftStyle) state.studio.draftStyle.seriesColors = {};
+      persist();
+      if (state.studio.tabKey) renderTabByKey(state.studio.tabKey);
+      const entry = C.getRenderedSpec(state.studio.chartId);
+      if (entry && entry.rawSpec) populateStudioSeriesPickers(entry.rawSpec, getStudioMergedStyle());
+      renderStudioPreview();
+      toast("Reset variable styles across all tabs");
     });
 
     [
@@ -3890,13 +3949,15 @@
       const tabKey = state.studio.tabKey;
       if (!chartId || !tabKey) return;
       delete state.perChartStyles[chartId];
-      const baseStyle = C.normalizeStyleOptions(state.views[tabKey]?.style || C.DEFAULT_CHART_STYLE);
+      const baseStyle = C.normalizeStyleOptions(C.DEFAULT_CHART_STYLE);
       state.studio.draftStyle = baseStyle;
       state.studio.mplOpts = MP ? { ...MP.DEFAULT_MPL_OPTIONS } : {};
+      persist();
       renderTabByKey(tabKey);
       const entry = C.getRenderedSpec(chartId);
-      syncStudioFormFromState(baseStyle);
-      if (entry && entry.rawSpec) populateStudioSeriesPickers(entry.rawSpec, baseStyle);
+      const merged = getStudioMergedStyle();
+      syncStudioFormFromState(merged);
+      if (entry && entry.rawSpec) populateStudioSeriesPickers(entry.rawSpec, merged);
       renderStudioPreview();
       toast("Reset graph overrides");
     });
@@ -3909,7 +3970,7 @@
       btn.disabled = true;
       btn.textContent = "Rendering PNG...";
       try {
-        const fname = await MP.exportMatplotlibImage(entry.rawSpec, state.studio.draftStyle, state.studio.mplOpts, "png", entry.filePrefix || state.studio.chartId);
+        const fname = await MP.exportMatplotlibImage(entry.rawSpec, getStudioMergedStyle(), state.studio.mplOpts, "png", entry.filePrefix || state.studio.chartId);
         toast(`Saved "${fname}"`);
       } catch (err) {
         toast(`PNG export failed: ${err.message}`);
@@ -3927,7 +3988,7 @@
       btn.disabled = true;
       btn.textContent = "Rendering SVG...";
       try {
-        const fname = await MP.exportMatplotlibImage(entry.rawSpec, state.studio.draftStyle, state.studio.mplOpts, "svg", entry.filePrefix || state.studio.chartId);
+        const fname = await MP.exportMatplotlibImage(entry.rawSpec, getStudioMergedStyle(), state.studio.mplOpts, "svg", entry.filePrefix || state.studio.chartId);
         toast(`Saved "${fname}"`);
       } catch (err) {
         toast(`SVG export failed: ${err.message}`);
@@ -3940,7 +4001,7 @@
     $("btn-studio-save-py")?.addEventListener("click", () => {
       const entry = C.getRenderedSpec(state.studio.chartId);
       if (!entry || !entry.rawSpec || !MP) return;
-      const pyCode = MP.generatePythonScript(entry.rawSpec, state.studio.draftStyle, state.studio.mplOpts, entry.filePrefix || state.studio.chartId);
+      const pyCode = MP.generatePythonScript(entry.rawSpec, getStudioMergedStyle(), state.studio.mplOpts, entry.filePrefix || state.studio.chartId);
       const filename = `${entry.filePrefix || state.studio.chartId}_matplotlib.py`;
       S.downloadFile(filename, pyCode, "text/x-python");
       toast(`Downloaded "${filename}"`);
@@ -3966,13 +4027,13 @@
 
     // Default form timestamps
     const exp = getActiveExp();
+    syncChartSettingsFromExp(exp);
     $("od-date").value = todayIso();
     $("od-time").value = nowTimeHm();
     $("od-wavelength").value = exp ? exp.meta.defaultWavelength || 680 : 680;
     $("cc-date").value = todayIso();
     $("cc-time").value = nowTimeHm();
 
-    initChartStyleBars();
     initChartFullsizeButtons();
     bindEvents();
     updateCellCountModeUI();

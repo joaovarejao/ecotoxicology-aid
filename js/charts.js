@@ -46,6 +46,7 @@
     palette: "default",
     primaryColor: "",
     seriesColors: {},
+    seriesStyles: {},
     lineStyle: "solid",
     lineWidth: 2.2,
     pointStyle: "auto",
@@ -53,6 +54,30 @@
   };
 
   const renderedSpecs = new Map();
+
+  function normalizeSeriesStyleEntry(v = {}) {
+    const o = v || {};
+    const out = {};
+    if (typeof o.color === "string" && o.color.trim()) out.color = o.color.trim();
+    if (["solid", "dash", "dot", "dashdot", "none", "inherit"].includes(o.lineStyle) && o.lineStyle !== "inherit") {
+      out.lineStyle = o.lineStyle;
+    }
+    if (typeof o.pointStyle === "string" && o.pointStyle && o.pointStyle !== "inherit") {
+      out.pointStyle = o.pointStyle;
+    }
+    return out;
+  }
+
+  function normalizeSeriesStylesMap(rawMap = {}) {
+    const out = {};
+    if (!rawMap || typeof rawMap !== "object") return out;
+    for (const [k, v] of Object.entries(rawMap)) {
+      if (!k || !v || typeof v !== "object") continue;
+      const clean = normalizeSeriesStyleEntry(v);
+      if (Object.keys(clean).length > 0) out[k] = clean;
+    }
+    return out;
+  }
 
   function normalizeStyleOptions(raw = {}) {
     const s = raw || {};
@@ -62,20 +87,31 @@
       palette: PALETTES[s.palette] ? s.palette : "default",
       primaryColor: typeof s.primaryColor === "string" ? s.primaryColor.trim() : "",
       seriesColors: s.seriesColors && typeof s.seriesColors === "object" ? { ...s.seriesColors } : {},
+      seriesStyles: normalizeSeriesStylesMap(s.seriesStyles),
       lineStyle: ["solid", "dash", "dot", "dashdot", "none"].includes(s.lineStyle) ? s.lineStyle : "solid",
-      lineWidth: Number.isFinite(lw) && lw >= 0.5 && lw <= 8 ? lw : 2.2,
+      lineWidth: Number.isFinite(lw) && lw >= 0.5 && lw <= 12 ? lw : 2.2,
       pointStyle: typeof s.pointStyle === "string" && s.pointStyle ? s.pointStyle : "auto",
-      pointSize: Number.isFinite(ps) && ps >= 2 && ps <= 18 ? ps : 7,
+      pointSize: Number.isFinite(ps) && ps >= 2 && ps <= 24 ? ps : 7,
     };
   }
 
-  function mergeStyleOptions(baseStyle = {}, overrideStyle = {}) {
+  function mergeStyleOptions(baseStyle = {}, overrideStyle = {}, variableStyles = null) {
     const b = normalizeStyleOptions(baseStyle);
     const o = overrideStyle || {};
+    const mergedSeriesStyles = {
+      ...(b.seriesStyles || {}),
+      ...(o.seriesStyles || {}),
+      ...(variableStyles && typeof variableStyles === "object" ? normalizeSeriesStylesMap(variableStyles) : {}),
+    };
+    const mergedColors = { ...(b.seriesColors || {}), ...(o.seriesColors || {}) };
+    for (const [k, v] of Object.entries(mergedSeriesStyles)) {
+      if (v && v.color) mergedColors[k] = v.color;
+    }
     return normalizeStyleOptions({
       ...b,
       ...o,
-      seriesColors: { ...(b.seriesColors || {}), ...(o.seriesColors || {}) },
+      seriesColors: mergedColors,
+      seriesStyles: mergedSeriesStyles,
     });
   }
 
@@ -83,9 +119,13 @@
     return (PALETTES[paletteKey] || PALETTES.default).colors;
   }
 
-  function getConcColor(conc, sortedAllConcs, paletteKey = "default", seriesColors = null) {
-    if (seriesColors && seriesColors[String(conc)]) {
-      return seriesColors[String(conc)];
+  function getConcColor(conc, sortedAllConcs, paletteKey = "default", seriesColors = null, seriesStyles = null) {
+    const key = String(conc);
+    if (seriesStyles && seriesStyles[key] && seriesStyles[key].color) {
+      return seriesStyles[key].color;
+    }
+    if (seriesColors && seriesColors[key]) {
+      return seriesColors[key];
     }
     const palette = getPaletteColors(paletteKey);
     const idx = sortedAllConcs ? sortedAllConcs.indexOf(Number(conc)) : 0;
@@ -113,25 +153,58 @@
     let barIdx = 0;
     let scatterIdx = 0;
 
+    const getVarStyle = (name, concKey, varKey) => {
+      const sMap = style.seriesStyles || {};
+      const cMap = style.seriesColors || {};
+      const entry =
+        (concKey && sMap[concKey]) ||
+        (varKey && sMap[varKey]) ||
+        (name && sMap[name]) ||
+        {};
+      const color =
+        entry.color ||
+        (concKey && cMap[concKey]) ||
+        (varKey && cMap[varKey]) ||
+        (name && cMap[name]) ||
+        null;
+      return {
+        color,
+        lineStyle: entry.lineStyle || null,
+        pointStyle: entry.pointStyle || null,
+      };
+    };
+
     out.traces = out.traces.map((tr) => {
       const name = String(tr.name || "");
       if (tr.hoverinfo === "skip" && name === "Highlighted") return tr;
 
-      const isFit = name.includes(" fit (") || name.startsWith("OLS Fit:");
+      const isFit = Boolean(tr.meta?.isFit) || name.includes(" fit (") || name.startsWith("OLS Fit:");
       const isEst = name.startsWith("Est. ") || name.startsWith("Probit EC50");
       const concKey = tr.meta && tr.meta.conc !== undefined ? String(tr.meta.conc) : null;
-      const customSeriesColor =
-        (name && style.seriesColors[name]) ||
-        (concKey && style.seriesColors[concKey]) ||
-        null;
+      const varKey = tr.meta && tr.meta.varKey ? String(tr.meta.varKey) : null;
+      const varStyle = getVarStyle(name, concKey, varKey);
 
       if (tr.type === "bar") {
-        const bColor =
-          customSeriesColor ||
-          (barTraces.length === 1 && style.primaryColor ? style.primaryColor : null) ||
-          (style.palette !== "default" ? paletteColors[barIdx % paletteColors.length] : null);
-        if (bColor) {
-          tr.marker = { ...(tr.marker || {}), color: bColor };
+        if (barTraces.length === 1 && Array.isArray(tr.meta?.concs)) {
+          const allC = tr.meta.concs;
+          tr.marker = {
+            ...(tr.marker || {}),
+            color: allC.map((c, i) => {
+              const vs = getVarStyle(null, String(c), null);
+              if (vs.color) return vs.color;
+              if (style.primaryColor) return style.primaryColor;
+              if (style.palette !== "default") return paletteColors[i % paletteColors.length];
+              return Array.isArray(tr.marker?.color) ? tr.marker.color[i] : tr.marker?.color;
+            }),
+          };
+        } else {
+          const bColor =
+            varStyle.color ||
+            (barTraces.length === 1 && style.primaryColor ? style.primaryColor : null) ||
+            (style.palette !== "default" ? paletteColors[barIdx % paletteColors.length] : null);
+          if (bColor) {
+            tr.marker = { ...(tr.marker || {}), color: bColor };
+          }
         }
         barIdx++;
         return tr;
@@ -139,7 +212,7 @@
 
       if (tr.type !== "scatter") return tr;
 
-      let resolvedColor = customSeriesColor;
+      let resolvedColor = varStyle.color;
       if (!resolvedColor && !isEst && !isFit) {
         if (isSingleCurve && style.primaryColor) {
           resolvedColor = style.primaryColor;
@@ -153,19 +226,22 @@
         tr.line = { ...(tr.line || {}), color: resolvedColor };
         if (tr.marker && !Array.isArray(tr.marker.color)) {
           tr.marker = { ...tr.marker, color: resolvedColor };
-        } else if (tr.marker && Array.isArray(tr.marker.color) && (isSingleCurve || customSeriesColor || style.palette !== "default")) {
+        } else if (tr.marker && Array.isArray(tr.marker.color) && (isSingleCurve || varStyle.color || style.palette !== "default")) {
           tr.marker = { ...tr.marker, color: tr.marker.color.map(() => resolvedColor) };
         }
       }
 
+      const effectiveLineStyle = !isFit && varStyle.lineStyle ? varStyle.lineStyle : style.lineStyle;
+      const effectivePointStyle = !isFit && varStyle.pointStyle ? varStyle.pointStyle : style.pointStyle;
+
       if (!isEst) {
         const hasLines = String(tr.mode || "").includes("lines");
         if (hasLines) {
-          if (style.lineStyle === "none" && !isFit) {
+          if (effectiveLineStyle === "none" && !isFit) {
             tr.mode = "markers";
           } else {
             const baseW = Number(tr.line?.width) || 2.2;
-            const dashVal = isFit && style.lineStyle === "solid" ? tr.line?.dash || "dot" : style.lineStyle === "none" ? "dot" : style.lineStyle;
+            const dashVal = isFit && effectiveLineStyle === "solid" ? tr.line?.dash || "dot" : effectiveLineStyle === "none" ? "dot" : effectiveLineStyle;
             tr.line = {
               ...(tr.line || {}),
               dash: dashVal,
@@ -176,18 +252,18 @@
       }
 
       if (!isFit && !isEst && tr.marker) {
-        if (style.pointStyle === "none") {
+        if (effectivePointStyle === "none") {
           if (String(tr.mode || "").includes("lines")) {
             tr.mode = "lines";
           }
         } else {
-          if (String(tr.mode || "") === "lines" && style.lineStyle !== "none" && style.pointStyle !== "auto") {
+          if (String(tr.mode || "") === "lines" && effectiveLineStyle !== "none" && effectivePointStyle !== "auto") {
             tr.mode = "lines+markers";
           }
-          if (style.pointStyle !== "auto") {
+          if (effectivePointStyle !== "auto") {
             tr.marker = {
               ...tr.marker,
-              symbol: Array.isArray(tr.marker.symbol) ? tr.marker.symbol.map(() => style.pointStyle) : style.pointStyle,
+              symbol: Array.isArray(tr.marker.symbol) ? tr.marker.symbol.map(() => effectivePointStyle) : effectivePointStyle,
             };
           }
           if (Math.abs(sizeRatio - 1) > 0.01) {
@@ -361,7 +437,8 @@
       icTarget: Number.isFinite(Number(opts.icTarget)) ? Number(opts.icTarget) : 50,
       tStartHours: opts.tStartHours !== null && opts.tStartHours !== undefined && opts.tStartHours !== "" ? Number(opts.tStartHours) : null,
       tEndHours: opts.tEndHours !== null && opts.tEndHours !== undefined && opts.tEndHours !== "" ? Number(opts.tEndHours) : null,
-      style: normalizeStyleOptions(opts.style),
+      style: mergeStyleOptions(opts.style, {}, opts.variableStyles),
+      variableStyles: opts.variableStyles && typeof opts.variableStyles === "object" ? opts.variableStyles : null,
       perChartStyles: opts.perChartStyles && typeof opts.perChartStyles === "object" ? opts.perChartStyles : {},
     };
   }
@@ -509,6 +586,7 @@
         traces: [
           {
             type: "bar",
+            meta: { concs: rows.map((r) => r.concentration) },
             x: xs,
             y: ys,
             error_y: { type: "data", array: errs, visible: view.showErrorBars, color: t.muted, thickness: 1.5 },
@@ -590,6 +668,7 @@
         semiTraces.push({
           type: "scatter",
           mode: "lines",
+          meta: { conc: Number(conc), isFit: true },
           name: `${conc} fit (R²=${sRow.r2?.toFixed(3) ?? "—"})`,
           showlegend: false,
           x: [sRow.fitLine.x0, sRow.fitLine.x1],
@@ -653,7 +732,9 @@
     if (doseValid.length > 0) {
       const targetPct = view.icTarget;
       const pointColors = doseValid.map((r) => {
-        if (view.highlighted.has(Number(r.concentration))) return getConcColor(r.concentration, allConcs, view.style.palette, view.style.seriesColors);
+        const customCol = view.style.seriesStyles?.[String(r.concentration)]?.color || view.style.seriesColors?.[String(r.concentration)];
+        if (customCol) return customCol;
+        if (view.highlighted.has(Number(r.concentration))) return getConcColor(r.concentration, allConcs, view.style.palette, view.style.seriesColors, view.style.seriesStyles);
         if (r.isControl) return t.teal;
         return t.crimson;
       });
@@ -663,6 +744,8 @@
         return 8;
       });
       const pointSymbols = doseValid.map((r) => {
+        const customSym = view.style.seriesStyles?.[String(r.concentration)]?.pointStyle;
+        if (customSym && customSym !== "auto" && customSym !== "none") return customSym;
         if (r.isControl) return "star";
         if (view.highlighted.has(Number(r.concentration))) return "circle";
         return "diamond";
@@ -779,7 +862,7 @@
 
     const specs = buildTimeSeriesSpecs(config, false);
     const view = normalizeViewOptions(config.viewOptions);
-    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid], view.variableStyles);
 
     if (specs.growth) {
       const suffix = timepointsCount === 1 ? "snapshot" : "growth";
@@ -875,6 +958,7 @@
       traces: [
         {
           type: "bar",
+          meta: { concs: visibleRows.map((r) => r.dilution) },
           name: "μ (h⁻¹)",
           x: labels,
           y: visibleRows.map((r) => r.mu),
@@ -896,12 +980,18 @@
     if (validInh.length > 0) {
       const targetPct = view.icTarget;
       const pointColors = validInh.map((r) => {
-        if (view.highlighted.has(Number(r.dilution))) return getConcColor(r.dilution, allConcs, view.style.palette, view.style.seriesColors);
+        const customCol = view.style.seriesStyles?.[String(r.dilution)]?.color || view.style.seriesColors?.[String(r.dilution)];
+        if (customCol) return customCol;
+        if (view.highlighted.has(Number(r.dilution))) return getConcColor(r.dilution, allConcs, view.style.palette, view.style.seriesColors, view.style.seriesStyles);
         if (r.isControl) return t.teal;
         return t.crimson;
       });
       const pointSizes = validInh.map((r) => (view.highlighted.has(Number(r.dilution)) ? 13 : r.isControl ? 11 : 8));
-      const pointSymbols = validInh.map((r) => (r.isControl ? "star" : view.highlighted.has(Number(r.dilution)) ? "circle" : "diamond"));
+      const pointSymbols = validInh.map((r) => {
+        const customSym = view.style.seriesStyles?.[String(r.dilution)]?.pointStyle;
+        if (customSym && customSym !== "auto" && customSym !== "none") return customSym;
+        return r.isControl ? "star" : view.highlighted.has(Number(r.dilution)) ? "circle" : "diamond";
+      });
 
       const traces = [
         {
@@ -1003,7 +1093,7 @@
 
     const specs = buildLemnaSpecs(analysis, concUnit, false, viewOptions);
     const view = normalizeViewOptions(viewOptions);
-    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid], view.variableStyles);
 
     if (specs.fronds) {
       renderChartInto("lemna-chart-fronds", specs.fronds, "lemna_fronds", styleFor("lemna-chart-fronds"));
@@ -1070,7 +1160,7 @@
 
     const spec = buildDilutionSpec(dilutions, concUnit, false, viewOptions);
     const view = normalizeViewOptions(viewOptions);
-    const style = mergeStyleOptions(view.style, view.perChartStyles["dilution-chart-bars"]);
+    const style = mergeStyleOptions(view.style, view.perChartStyles["dilution-chart-bars"], view.variableStyles);
     if (spec) {
       renderChartInto("dilution-chart-bars", spec, "dilution_series", style);
     }
@@ -1084,7 +1174,7 @@
     const { rows, timepoint, targetPct, probit, primaryEC } = analysis;
     if (!rows || rows.length === 0) return {};
 
-    const styleNorm = normalizeStyleOptions(viewOptions.style);
+    const styleNorm = mergeStyleOptions(viewOptions.style, {}, viewOptions.variableStyles);
     const view = {
       highlightConcs: Array.isArray(viewOptions.highlightConcs) ? viewOptions.highlightConcs.map(Number) : [],
       isolate: Boolean(viewOptions.isolate),
@@ -1109,6 +1199,7 @@
       doseTraces.push({
         type: "scatter",
         mode: "lines+markers",
+        meta: { varKey: "24 h Immobilization" },
         name: isActive ? "24 h Immobilization (active)" : "24 h Immobilization",
         x: pts24.map((r) => r.concentration),
         y: pts24.map((r) => r.corr24),
@@ -1127,6 +1218,7 @@
       doseTraces.push({
         type: "scatter",
         mode: "lines+markers",
+        meta: { varKey: "48 h Immobilization" },
         name: isActive ? "48 h Immobilization (active)" : "48 h Immobilization",
         x: pts48.map((r) => r.concentration),
         y: pts48.map((r) => r.corr48),
@@ -1367,7 +1459,7 @@
 
     const specs = buildDaphniaSpecs(analysis, concUnit, false, viewOptions);
     const view = normalizeViewOptions(viewOptions);
-    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid], view.variableStyles);
 
     if (specs.dose) {
       renderChartInto("daphnia-chart-dose", specs.dose, "daphnia_dose_response", styleFor("daphnia-chart-dose"));
@@ -1556,7 +1648,7 @@
 
     const specs = buildVibrioSpecs(analysis, concUnit, false, viewOptions);
     const view = normalizeViewOptions(viewOptions);
-    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid]);
+    const styleFor = (cid) => mergeStyleOptions(view.style, view.perChartStyles[cid], view.variableStyles);
 
     if (!specs.inhibition) {
       renderedSpecs.delete("vibrio-chart-inhibition");
