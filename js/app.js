@@ -2060,13 +2060,98 @@
     else if (tabKey === "dilutions") renderDilutionsTab();
   }
 
+  function specHasErrorBars(rawSpec) {
+    return Boolean(
+      rawSpec &&
+        Array.isArray(rawSpec.traces) &&
+        rawSpec.traces.some((tr) => tr && tr.error_y && Array.isArray(tr.error_y.array))
+    );
+  }
+
+  function getTabSdDefault(tabKey) {
+    return state.views[tabKey]?.showErrorBars !== false;
+  }
+
+  function getEffectiveSdForChart(chartId, tabKey) {
+    const ov = state.perChartStyles[chartId];
+    if (ov && typeof ov.showErrorBars === "boolean") return ov.showErrorBars;
+    return getTabSdDefault(tabKey);
+  }
+
+  function hasNonDefaultChartOverride(ov) {
+    if (!ov || typeof ov !== "object") return false;
+    const norm = C.normalizeStyleOptions(ov);
+    return (
+      norm.palette !== "default" ||
+      Boolean(norm.primaryColor) ||
+      norm.lineStyle !== "solid" ||
+      Math.abs(norm.lineWidth - 2.2) > 0.01 ||
+      norm.pointStyle !== "auto" ||
+      Math.abs(norm.pointSize - 7) > 0.01 ||
+      typeof norm.showErrorBars === "boolean" ||
+      Object.keys(norm.seriesColors || {}).length > 0 ||
+      Object.keys(norm.seriesStyles || {}).length > 0
+    );
+  }
+
   function refreshChartOverrideBadges() {
     document.querySelectorAll(".chart-studio-btn[data-studio-chart]").forEach((btn) => {
       const ov = state.perChartStyles[btn.dataset.studioChart];
-      const hasOv = Boolean(ov && Object.keys(ov).length > 0);
+      const hasOv = hasNonDefaultChartOverride(ov);
       btn.classList.toggle("has-override", hasOv);
       btn.textContent = hasOv ? "⚙ Style ★ / Matplotlib" : "⚙ Style / Matplotlib";
     });
+
+    document.querySelectorAll(".chart-sd-btn[data-sd-chart]").forEach((btn) => {
+      const chartId = btn.dataset.sdChart;
+      const entry = C.getRenderedSpec(chartId);
+      const supported = Boolean(entry && specHasErrorBars(entry.rawSpec));
+      btn.hidden = !supported;
+      if (!supported) return;
+
+      const tabKey = inferTabFromChartId(chartId);
+      const tabDef = getTabSdDefault(tabKey);
+      const ov = state.perChartStyles[chartId];
+      const hasExplicit = Boolean(ov && typeof ov.showErrorBars === "boolean");
+      const effective = hasExplicit ? ov.showErrorBars : tabDef;
+
+      btn.classList.toggle("active", effective);
+      btn.classList.toggle("is-override", hasExplicit);
+      btn.setAttribute("aria-pressed", String(effective));
+      btn.textContent = effective ? "± SD" : "± SD Off";
+      btn.title = hasExplicit
+        ? `± SD error bars ${effective ? "ON" : "OFF"} (this graph override — tab default: ${tabDef ? "ON" : "OFF"}). Click to toggle.`
+        : `± SD error bars ${effective ? "ON" : "OFF"} (tab default). Click to toggle for this graph only.`;
+    });
+  }
+
+  function toggleChartSd(chartId) {
+    if (!chartId) return;
+    const tabKey = inferTabFromChartId(chartId);
+    const tabDef = getTabSdDefault(tabKey);
+    const curEffective = getEffectiveSdForChart(chartId, tabKey);
+    const nextVal = !curEffective;
+    const nextOverride = nextVal === tabDef ? null : nextVal;
+    const curOv = C.normalizeStyleOptions(state.perChartStyles[chartId] || {});
+    curOv.showErrorBars = nextOverride;
+
+    if (hasNonDefaultChartOverride(curOv)) {
+      state.perChartStyles[chartId] = curOv;
+    } else {
+      delete state.perChartStyles[chartId];
+    }
+
+    if (state.studio.chartId === chartId && state.studio.draftStyle) {
+      state.studio.draftStyle.showErrorBars = nextOverride;
+      if ($("studio-show-sd")) {
+        $("studio-show-sd").value =
+          nextOverride === true ? "show" : nextOverride === false ? "hide" : "inherit";
+      }
+      renderStudioPreview();
+    }
+
+    persist();
+    renderTabByKey(tabKey);
   }
 
   function getTraceDisplayColor(tr, idx, paletteKey) {
@@ -2214,6 +2299,14 @@
     $("studio-title-input").value = mpl.title || "";
     $("studio-xlabel-input").value = mpl.xLabel || "";
     $("studio-ylabel-input").value = mpl.yLabel || "";
+    if ($("studio-show-sd")) {
+      $("studio-show-sd").value =
+        effectiveStyle.showErrorBars === true
+          ? "show"
+          : effectiveStyle.showErrorBars === false
+          ? "hide"
+          : "inherit";
+    }
   }
 
   function getStudioMergedStyle() {
@@ -2275,6 +2368,9 @@
       b.classList.toggle("active", b.dataset.studioView === "preview");
     });
 
+    if ($("studio-sd-field")) {
+      $("studio-sd-field").hidden = !specHasErrorBars(entry.rawSpec);
+    }
     syncStudioFormFromState(effective);
     populateStudioSeriesPickers(entry.rawSpec, effective);
     openModal("chart-studio-modal");
@@ -2288,6 +2384,18 @@
       const boxId = box ? box.id : "";
       const bar = document.createElement("div");
       bar.className = "chart-card-bar";
+
+      if (boxId) {
+        const sdBtn = document.createElement("button");
+        sdBtn.type = "button";
+        sdBtn.className = "btn btn-xs btn-ghost chart-sd-btn";
+        sdBtn.dataset.sdChart = boxId;
+        sdBtn.hidden = true;
+        sdBtn.textContent = "± SD";
+        sdBtn.setAttribute("aria-pressed", "true");
+        sdBtn.addEventListener("click", () => toggleChartSd(boxId));
+        bar.appendChild(sdBtn);
+      }
 
       if (boxId && MP) {
         const studioBtn = document.createElement("button");
@@ -4153,7 +4261,11 @@
       if (!chartId || !tabKey) return;
       if ($("studio-sync-live").checked) {
         const cleanGraphStyle = C.normalizeStyleOptions({ ...state.studio.draftStyle, seriesStyles: {} });
-        state.perChartStyles[chartId] = cleanGraphStyle;
+        if (hasNonDefaultChartOverride(cleanGraphStyle)) {
+          state.perChartStyles[chartId] = cleanGraphStyle;
+        } else {
+          delete state.perChartStyles[chartId];
+        }
         persist();
         renderTabByKey(tabKey);
       }
@@ -4223,6 +4335,12 @@
         }
         applyStudioDraftToLive();
       });
+    });
+
+    $("studio-show-sd")?.addEventListener("change", (ev) => {
+      const val = ev.target.value;
+      state.studio.draftStyle.showErrorBars = val === "show" ? true : val === "hide" ? false : null;
+      applyStudioDraftToLive();
     });
 
     $("btn-studio-clear-primary")?.addEventListener("click", () => {

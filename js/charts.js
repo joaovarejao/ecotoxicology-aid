@@ -51,6 +51,7 @@
     lineWidth: 2.2,
     pointStyle: "auto",
     pointSize: 7,
+    showErrorBars: null,
   };
 
   const renderedSpecs = new Map();
@@ -92,6 +93,7 @@
       lineWidth: Number.isFinite(lw) && lw >= 0.5 && lw <= 12 ? lw : 2.2,
       pointStyle: typeof s.pointStyle === "string" && s.pointStyle ? s.pointStyle : "auto",
       pointSize: Number.isFinite(ps) && ps >= 2 && ps <= 24 ? ps : 7,
+      showErrorBars: typeof s.showErrorBars === "boolean" ? s.showErrorBars : null,
     };
   }
 
@@ -110,6 +112,12 @@
     return normalizeStyleOptions({
       ...b,
       ...o,
+      showErrorBars:
+        typeof o.showErrorBars === "boolean"
+          ? o.showErrorBars
+          : typeof b.showErrorBars === "boolean"
+          ? b.showErrorBars
+          : null,
       seriesColors: mergedColors,
       seriesStyles: mergedSeriesStyles,
     });
@@ -177,6 +185,10 @@
     out.traces = out.traces.map((tr) => {
       const name = String(tr.name || "");
       if (tr.hoverinfo === "skip" && name === "Highlighted") return tr;
+
+      if ((style.showErrorBars === true || style.showErrorBars === false) && tr.error_y && Array.isArray(tr.error_y.array)) {
+        tr.error_y = { ...tr.error_y, visible: style.showErrorBars };
+      }
 
       const isFit = Boolean(tr.meta?.isFit) || name.includes(" fit (") || name.startsWith("OLS Fit:");
       const isEst = name.startsWith("Est. ") || name.startsWith("Probit EC50");
@@ -384,6 +396,7 @@
   }
 
   function showEmpty(containerId, title, subtitle) {
+    renderedSpecs.delete(containerId);
     const el = document.getElementById(containerId);
     if (!el) return;
     if (global.Plotly && el.data) {
@@ -1506,15 +1519,13 @@
           name: "Luminescence Inhibition (%)",
           x: inhRows.map((r) => r.concentration),
           y: inhRows.map((r) => r.inhibition),
-          error_y: view.showErrorBars
-            ? {
-                type: "data",
-                array: inhRows.map((r) => r.sdInhibition || 0),
-                visible: true,
-                thickness: 1.5,
-                width: 4,
-              }
-            : { visible: false },
+          error_y: {
+            type: "data",
+            array: inhRows.map((r) => r.sdInhibition || 0),
+            visible: view.showErrorBars,
+            thickness: 1.5,
+            width: 4,
+          },
           line: { color: t.crimson, width: 2.8 },
           marker: {
             size: inhRows.map((r) => (hasHighlight && isSelected(r.concentration) ? 13 : 8.5)),

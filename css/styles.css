@@ -2105,6 +2105,34 @@ table.sci-table tbody tr.row-highlighted {
   font-weight: 700;
 }
 
+.chart-sd-btn {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.chart-sd-btn[hidden] {
+  display: none;
+}
+
+.chart-sd-btn:hover {
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
+.chart-sd-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: rgba(13, 148, 136, 0.35);
+}
+
+.chart-sd-btn.is-override {
+  border-style: dashed;
+}
+
 /* ---------- Graph Style & Matplotlib Studio Modal ---------- */
 
 .modal.modal-xl {
@@ -2172,6 +2200,10 @@ table.sci-table tbody tr.row-highlighted {
 
 .studio-field.full {
   grid-column: 1 / -1;
+}
+
+.studio-field[hidden] {
+  display: none;
 }
 
 .studio-range-num {
